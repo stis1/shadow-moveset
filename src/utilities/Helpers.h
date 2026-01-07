@@ -20,6 +20,12 @@ constexpr double DEG2RAD = 0.01745329238474369;
 #define PRINT_POINTER(a) printf(#a " = %llx\n", a);
 #define PRINT_BYTE(a) printf(#a " = %x\n", a);
 
+#define PRINT_ERROR(str, ...) \
+    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_GREEN | FOREGROUND_INTENSITY); \
+    printf(str, __VA_ARGS__); \
+    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+//took that from Hyper's helpers for debugging
+
 #define IS_NOP(addr) (addr != nullptr && *(uint8_t*)(addr) == 0x90)
 
 #define INI_BEGIN_SECTION(section) \
