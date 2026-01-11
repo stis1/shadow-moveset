@@ -6,85 +6,107 @@ enum class StateDirector // redirect to what state (initially i named this guy S
 	run,
 	boost,
 	homing,
-	norunboost,
-	doublejump
+	preserveboost,
+	doublejump,
+	stomp
 };
 
-void tryDamage(app::player::PlayerHsmContext* ctx) {
+void doWeDoDriftDashOrNah(app::player::PlayerHsmContext* ctx) {
+	
+}
+
+void tryDamage(app::player::PlayerHsmContext* ctx, bool leavemealone) {
 	auto* collision = ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>();
 	auto* BBbattle = ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardBattle>();
 	auto* BBstatus = ctx->blackboardStatus;
 	auto* HSMComp = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
 
 	static bool isInApplicableState = false;
-	static bool bomboDamage = false;
+	//static bool bomboDamage = false;
 	
 	bool isBoosting = BBstatus->GetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST);
 	
 	int getID = HSMComp->GetCurrentState();
 	
-	if (getID == 107/* || getID == 10 || getID == 11 || getID == 9 || getID == 46*/) {
+	if (getID == 107 || getID == 10 || getID == 11 || getID == 9 /*|| getID == 46 */ ) {
 		isInApplicableState = true;
 	}
 	else {
 		isInApplicableState = false;
 	}
 
-	if (isBoosting || isInApplicableState && !bomboDamage) {
-		collision->SetTypeAndRadius(2, 1.0f);
+	if (isInApplicableState) {
+		collision->SetTypeAndRadius(1, 1);
 		BBbattle->SetFlag020(false);
-		bomboDamage = true;
+		//bomboDamage = true;
+		
 	}
-	else if (bomboDamage) {
+	if (isBoosting) {
+		collision->SetTypeAndRadius(2, 1);
+		BBbattle->SetFlag020(false);
+		//bomboDamage = true;
+		
+	}
+	if (!isBoosting && !isInApplicableState)
+	{
+		collision->SetTypeAndRadius(1, 0);
 		collision->SetTypeAndRadius(2, 0);
 		BBbattle->SetFlag020(true);
-		bomboDamage = false;
+		//bomboDamage = false;
+		
 	}	
 	return;
 }
-
+// 0 if damage is needed 
 void Redirect(app::player::PlayerHsmContext* ctx, StateDirector to_what)
 {
 	auto* HSMComp = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
+	auto* GOCSound = ctx->playerObject->GetComponent<hh::snd::GOCSound>();
 	switch (to_what) 
 	{
 		case StateDirector::driftdash:
 			HSMComp->hsm.ChangeState(107);
-			tryDamage(ctx);
+			tryDamage(ctx, 0);
 			PRINT_ERROR(" DIRECTED TO DRIFTDASH \n");
-			return;
+			GOCSound->Play("sd_spin", 1);
+			break;
 		case StateDirector::bouncejump:
 			HSMComp->hsm.ChangeState(11);
-			tryDamage(ctx);
 			PRINT_ERROR(" DIRECTED TO BOUNCEJUMP \n");
-			return;
+
+			break;
 		case StateDirector::jump:
 			HSMComp->hsm.ChangeState(9);
 			PRINT_ERROR(" DIRECTED TO JUMP \n");
-			return;
+			break;
 		case StateDirector::run:
 			HSMComp->hsm.ChangeState(4);
 			PRINT_ERROR(" DIRECTED TO RUN \n");
-			return;
+			break;
 		case StateDirector::boost:
 			HSMComp->hsm.ChangeState(4);
 			ctx->blackboardStatus->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 1);
-			tryDamage(ctx);
+			tryDamage(ctx, 0);
 			PRINT_ERROR(" DIRECTED TO BOOST \n");
-			return;
+			break;
 		case StateDirector::homing:
 			HSMComp->hsm.ChangeState(63);
-			PRINT_ERROR(" HOMING SHADOW \n")
-		case StateDirector::norunboost:
+			PRINT_ERROR(" HOMING SHADOW \n");
+			break;
+		case StateDirector::preserveboost: // for boosting inside slalom, maybe others, bad implementation if being honest
 			ctx->blackboardStatus->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 1);
-			tryDamage(ctx);
-			PRINT_ERROR(" APPLIED BOOST TO SLALOM STEP\n");
+			tryDamage(ctx, 0);
+			PRINT_ERROR(" APPLIED BOOST TO SLALOM STEP \n");
+			break;
 		case StateDirector::doublejump:
 			HSMComp->hsm.ChangeState(10);
-			PRINT_ERROR(" DIRECTED TO DOUBLE JUMP \n")
-			return;
+			PRINT_ERROR(" DIRECTED TO DOUBLE JUMP \n");
+			break;
+		case StateDirector::stomp:
+			
+			PRINT_ERROR(" unfortunately \n");
 		default:
-			return;
+			break;
 	}
 	return;
 }
@@ -102,6 +124,10 @@ void Spin_control(app::player::PlayerHsmContext* ctx, float deltaTime) {
 	bool boostTap = inputcomp->actionMonitors[3].state & 512;
 	bool circleTap = inputcomp->actionMonitors[7].state & 512;
 	bool crossTap = inputcomp->actionMonitors[0].state & 512;
+
+	if (inputcomp->actionMonitors[1].state & 512) {
+		Redirect(ctx, StateDirector::homing);
+	}
 
 	if (boostHeld) // if boost button is pressed, don't give a choice to return to boost // 
 	{
@@ -174,7 +200,9 @@ HOOK(uint64_t, __fastcall, GameModeTitleInit, 0x1401990E0, app::game::GameMode* 
 }
 
 HOOK(bool, __fastcall, SpinAttackStep, 0x1406CB3E0, app::player::StateSpinAttack* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+	
 	Redirect(ctx, StateDirector::bouncejump);
+	
 	return originalSpinAttackStep(self, ctx, deltaTime);
 }
 
@@ -183,20 +211,19 @@ HOOK(bool, __fastcall, StompingBounceStep, 0x1406D1620, app::player::StateStompi
 	return originalStompingBounceStep(self, ctx, deltaTime);
 }
 
-HOOK(bool, __fastcall, SlidingStep, 0x1406CC600, app::player::StateSliding* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+HOOK(void, __fastcall, SlidingEnter, 0x1406CBB70, app::player::PlayerStateBase* self, app::player::PlayerHsmContext* ctx, int nextState) {
 	Redirect(ctx, StateDirector::driftdash);
-	return originalSlidingStep(self, ctx, deltaTime);
 }
 
-HOOK(bool, __fastcall, DropDashStep, 0x1406AFFB0, app::player::StateDropDash* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
-	/*Spin_control(ctx);*/
-	/*Redirect(ctx, StateDirector::driftdash);*/ //so many crashes 
-	return originalDropDashStep(self, ctx, deltaTime);
-}
+//HOOK(bool, __fastcall, DropDashStep, 0x1406AFFB0, app::player::StateDropDash* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+//	/*Spin_control(ctx);*/
+//	/*Redirect(ctx, StateDirector::driftdash);*/ //so many crashes 
+//	return originalDropDashStep(self, ctx, deltaTime);
+//}
 
 HOOK(bool, __fastcall, DriftDashStep, 0x1406AFB70, app::player::StateDriftDash* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	slalomEnable(ctx);
-	
+	tryDamage(ctx, 0);
 	Spin_control(ctx, deltaTime);
 	
 	return originalDriftDashStep(self, ctx, deltaTime);
@@ -214,17 +241,17 @@ HOOK(bool, __fastcall, StandStep, 0x1406CE800, app::player::StateStand* self, ap
 
 HOOK(bool, __fastcall, RunStep, 0x1406C7760, app::player::StateRun* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	slalomEnable(ctx);
-	tryDamage(ctx);
+	tryDamage(ctx, 1);
 	return originalRunStep(self, ctx, deltaTime);
 }
 
 HOOK(bool, __fastcall, SlalomStep, 0x1406C9390, app::player::StateSlalomStep * self, app::player::PlayerHsmContext * ctx, float deltaTime) {
-	slalomEnable(ctx);
 	auto* input = ctx->playerObject->GetComponent<hh::game::GOCInput>();
 	auto* inputcomp = input->GetInputComponent();
 	if (inputcomp->actionMonitors[3].state & 256) {
-		ctx->blackboardStatus->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 1);
-		tryDamage(ctx);
+		/*ctx->blackboardStatus->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 1);
+		tryDamage(ctx);*/
+		Redirect(ctx, StateDirector::preserveboost);
 	}
 	return originalSlalomStep(self, ctx, deltaTime);
 }
@@ -232,37 +259,51 @@ HOOK(bool, __fastcall, SlalomStep, 0x1406C9390, app::player::StateSlalomStep * s
 HOOK(bool, __fastcall, BounceJumpStep, 0x1406C1C80, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	auto* input = ctx->playerObject->GetComponent<hh::game::GOCInput>();
 	auto* inputcomp = input->GetInputComponent();
-	tryDamage(ctx);
+	
 	if (inputcomp->actionMonitors[1].state & 512) {
 		Redirect(ctx, StateDirector::homing);
 	}
 	if (inputcomp->actionMonitors[0].state & 512) {
 		Redirect(ctx, StateDirector::doublejump);
 	}
+	if (inputcomp->actionMonitors[7].state & 512) {
+		Redirect(ctx, StateDirector::stomp);
+	}
+	if (inputcomp->actionMonitors[3].state & 256) {
+		Redirect(ctx, StateDirector::preserveboost);
+	}
+	tryDamage(ctx, 0);
 	return originalBounceJumpStep(self, ctx, deltaTime);
 }
 
-HOOK(bool, __fastcall, JumpStep, 0x14A7C1140, app::player::StateJump* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
-	tryDamage(ctx);
-	return originalJumpStep(self, ctx, deltaTime);
+//HOOK(bool, __fastcall, JumpStep, 0x14A7C1140, app::player::StateJump* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+//	tryDamage(ctx, 0);
+//	return originalJumpStep(self, ctx, deltaTime);
+//}
+
+//HOOK(bool, __fastcall, DoubleJumpStep, 0x14A7ADE20, app::player::StateDoubleJump* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+//	tryDamage(ctx, 0);
+//	return originalDoubleJumpStep(self, ctx, deltaTime);
+//}
+
+//HOOK(bool, __fastcall, GrindDoubleJumpStep, 0x1406BEAB0, app::player::StateGrindDoubleJump* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+//	tryDamage(ctx, 0);
+//	return originalGrindDoubleJumpStep(self, ctx, deltaTime);
+//}
+
+//HOOK(bool, __fastcall, HomingAttackStep, 0x14A632A90, app::player::StateHomingAttack* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+//	tryDamage(ctx, 0);
+//	return originalHomingAttackStep(self, ctx, deltaTime);
+//}
+
+HOOK(bool, __fastcall, StateDriftDashLeave, 0x1406AF8D0, app::player::StateDriftDash* self, app::player::PlayerHsmContext* ctx, int nextState) {
+	auto* GOCSound = ctx->playerObject->GetComponent<hh::snd::GOCSound>();
+	originalStateDriftDashLeave(self, ctx, nextState);
+	tryDamage(ctx, 1);
+	GOCSound->StopAll(1);
+	return originalStateDriftDashLeave(self, ctx, nextState);
 }
 
-HOOK(bool, __fastcall, DoubleJumpStep, 0x14A7ADE20, app::player::StateDoubleJump* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
-	tryDamage(ctx);
-	return originalDoubleJumpStep(self, ctx, deltaTime);
-}
-
-HOOK(bool, __fastcall, GrindDoubleJumpStep, 0x1406BEAB0, app::player::StateGrindDoubleJump* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
-	tryDamage(ctx);
-	return originalGrindDoubleJumpStep(self, ctx, deltaTime);
-}
-
-HOOK(bool, __fastcall, HomingAttackStep, 0x14A632A90, app::player::StateHomingAttack* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
-	tryDamage(ctx);
-	ctx->blackboardStatus->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 0);
-	
-	return originalHomingAttackStep(self, ctx, deltaTime);
-}
 //HOOK(void, __fastcall, BindMaps, 0x140A2FEC0, hh::game::GameManager* gameManager, hh::hid::InputMapSettings* inputSettings) {
 //	inputSettings->BindActionMapping("PlayerLightDash", 0x2001du);
 //	originalBindMaps(gameManager, inputSettings);
@@ -276,20 +317,22 @@ BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID res
 	switch (reason)
 	{
 	case DLL_PROCESS_ATTACH:
-		//INSTALL_HOOK(GameModeTitleInit);
+		INSTALL_HOOK(GameModeTitleInit);
 		INSTALL_HOOK(SpinAttackStep);
 		INSTALL_HOOK(StompingBounceStep);
-		INSTALL_HOOK(SlidingStep);
+		INSTALL_HOOK(SlidingEnter);
 		//INSTALL_HOOK(DropDashStep);
 		INSTALL_HOOK(DriftDashStep);
 		INSTALL_HOOK(FallStep);
 		INSTALL_HOOK(StandStep);
 		INSTALL_HOOK(SlalomStep);
 		INSTALL_HOOK(BounceJumpStep);
-		INSTALL_HOOK(JumpStep);
-		INSTALL_HOOK(DoubleJumpStep);
-		INSTALL_HOOK(GrindDoubleJumpStep);
-		INSTALL_HOOK(HomingAttackStep);
+		INSTALL_HOOK(RunStep);
+		//INSTALL_HOOK(JumpStep);
+		//INSTALL_HOOK(DoubleJumpStep);
+		//INSTALL_HOOK(GrindDoubleJumpStep);
+		//INSTALL_HOOK(HomingAttackStep);
+		INSTALL_HOOK(StateDriftDashLeave);
 		break;
 	case DLL_PROCESS_DETACH:
 	case DLL_THREAD_ATTACH:
