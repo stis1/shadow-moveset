@@ -1,9 +1,9 @@
 [submodule "rangers-sdk"]
 	path = rangers-sdk
 	url = https://github.com/HE2-SDK/rangers-sdk.git
-[submodule "miller-sdk"]
-	path = miller-sdk
-	url = https://github.com/HE2-SDK/miller-sdk.git
 [submodule "vendor/detours/Detours"]
 	path = vendor/detours/Detours
 	url = https://github.com/microsoft/Detours.git
+[submodule "miller-sdk"]
+	path = miller-sdk
+	url = https://github.com/stis1/miller-sdk.git
