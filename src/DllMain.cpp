@@ -3,10 +3,11 @@
     printf(str, __VA_ARGS__); \
     SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
 
+
 enum class StateDirector // redirect to what state (initially i named this guy StateDictator XDDD)
 {
 	driftdash,
-	bouncejump, 
+	bouncejump,
 	jump,
 	run,
 	boost,
@@ -32,32 +33,31 @@ void tryDamage(app::player::PlayerHsmContext* ctx, bool leaveMeAlone) {
 	auto* HSMComp = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
 
 	static bool isInBallState = false;
-	
+
 	bool isBoosting = BBstatus->GetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST);
-	
+
 	int getID = HSMComp->GetCurrentState();
-	
+
 	if (leaveMeAlone == true) {
 		collision->SetTypeAndRadius(2, 0);
 		BBbattle->SetFlag020(true);
 		return;
 	}
 
-	if (getID == 107 || getID == 10 || getID == 11 || getID == 9 || getID == 46) {
+	if (getID == 107 || getID == 10 || getID == 9 || getID == 46) {
 		isInBallState = true;
 	}
 	else {
 		isInBallState = false;
 	}
 
-	/*if (isInBallState) {
-		collision->SetTypeAndRadius(2, 1);
-		BBbattle->SetFlag020(false);	
-		return;
-	}*/
-
 	if (isBoosting || isInBallState) {
 		collision->SetTypeAndRadius(2, 1);
+		BBbattle->SetFlag020(false);
+		return;
+	}
+	if (getID == 11) {
+		collision->SetTypeAndRadius(1, 1);
 		BBbattle->SetFlag020(false);
 		return;
 	}
@@ -67,11 +67,11 @@ void tryDamage(app::player::PlayerHsmContext* ctx, bool leaveMeAlone) {
 		collision->SetTypeAndRadius(2, 0);
 		BBbattle->SetFlag020(true);
 		return;
-	}	
+	}
 	return;
 }
 
-void DDash_bounceJump_hacking(app::player::PlayerHsmContext* ctx, bool leavemealone) {
+void rolling_air_hack(app::player::PlayerHsmContext* ctx, bool leavemealone) {
 	auto* gameManager = hh::game::GameManager::GetInstance();
 	auto* lvlInfo = gameManager->GetService<app::level::LevelInfo>();
 	auto isGrounded = lvlInfo->playerInformation->isGrounded;
@@ -83,18 +83,17 @@ void DDash_bounceJump_hacking(app::player::PlayerHsmContext* ctx, bool leavemeal
 	float vMagnitude = velocity_m.y();
 
 	if (isGrounded == 0 && leavemealone) {
-		params->whiteSpace.doubleJump.bounceSpeed = vMagnitude*.5;
-		params->forwardView.doubleJump.bounceSpeed = vMagnitude*.5;
-		params->sideView.doubleJump.bounceSpeed = vMagnitude*.5;
-		params->boss.doubleJump.bounceSpeed = vMagnitude*.5;
+		params->whiteSpace.doubleJump.bounceSpeed = vMagnitude*0.5f;
+		params->forwardView.doubleJump.bounceSpeed = vMagnitude;
+		params->sideView.doubleJump.bounceSpeed = vMagnitude;
+		params->boss.doubleJump.bounceSpeed = vMagnitude;
 	}
 	if (!leavemealone) {
 		params->whiteSpace.doubleJump.bounceSpeed = 25.0f;
 		params->forwardView.doubleJump.bounceSpeed = 25.0f;
 		params->sideView.doubleJump.bounceSpeed = 25.0f;
 		params->boss.doubleJump.bounceSpeed = 25.0f;
-	}
-
+	}	
 }
 
 void Redirect(app::player::PlayerHsmContext* ctx, StateDirector to_what)
@@ -107,11 +106,10 @@ void Redirect(app::player::PlayerHsmContext* ctx, StateDirector to_what)
 			HSMComp->ChangeState(107, 0);
 			tryDamage(ctx, false);
 			NOTIFY("[Shadow Moveset]: DIRECTED TO DRIFTDASH \n");
-			GOCSound->Play("sd_spin", 1);
 			break;
 		case StateDirector::bouncejump:
 			HSMComp->ChangeState(11, 0);
-			DDash_bounceJump_hacking(ctx, 1);
+			rolling_air_hack(ctx, 1);
 			tryDamage(ctx, false);
 			NOTIFY("[Shadow Moveset]: DIRECTED TO BOUNCEJUMP \n");
 			break;
@@ -154,7 +152,7 @@ void Redirect(app::player::PlayerHsmContext* ctx, StateDirector to_what)
 	return;
 }
 
-void driftdash_control(app::player::PlayerHsmContext* ctx) {
+void driftdash_inputs(app::player::PlayerHsmContext* ctx) {
 	auto* input = ctx->playerObject->GetComponent<hh::game::GOCInput>();
 	auto* inputcomp = input->GetInputComponent();
 	auto* gameManager = hh::game::GameManager::GetInstance();
@@ -170,11 +168,6 @@ void driftdash_control(app::player::PlayerHsmContext* ctx) {
 
 	if (isGrounded == 0) {
 		Redirect(ctx, StateDirector::bouncejump);
-		return;
-	}
-
-	if (squareTap && isGrounded == 0) {
-		Redirect(ctx, StateDirector::homing);
 		return;
 	}
 	if (circleTap && isGrounded == 1) {
@@ -211,13 +204,10 @@ void driftdash_control(app::player::PlayerHsmContext* ctx) {
 	return;
 }
 
-void bounceJump_control(app::player::PlayerHsmContext* ctx, float deltaTime) {
+void bouncejump_inputs(app::player::PlayerHsmContext* ctx) {
 	auto* input = ctx->playerObject->GetComponent<hh::game::GOCInput>();
 	auto* inputcomp = input->GetInputComponent();
-	
-	static float Timer = 0.0f;
-	
-	Timer += deltaTime;
+	auto* HSMComp = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
 
 	if (inputcomp->actionMonitors[1].state & 512) {
 		Redirect(ctx, StateDirector::homing);
@@ -225,12 +215,15 @@ void bounceJump_control(app::player::PlayerHsmContext* ctx, float deltaTime) {
 	if (inputcomp->actionMonitors[0].state & 512) {
 		Redirect(ctx, StateDirector::doublejump);
 	}
-	if (inputcomp->actionMonitors[7].state & 512 && Timer > 0.15f) {
-		Redirect(ctx, StateDirector::stomp);
+	if (inputcomp->actionMonitors[7].state & 512) {
+		HSMComp->ChangeState(52, 0);
 	}
 	if (inputcomp->actionMonitors[3].state & 256) {
 		Redirect(ctx, StateDirector::preserveboost);
 	}
+	//if (inputcomp->actionMonitors[7].state & 256 && Timer > 0.15f) {
+	//	Redirect(ctx, StateDirector::bouncejump);
+	//}
 }
 
 //void spinAttackSwitcher(app::player::PlayerHsmContext* ctx, float deltaTime) {
@@ -282,20 +275,29 @@ void spinAttackCalculator(app::player::PlayerHsmContext* ctx) {
 	}
 }
 
-void driftDashSwitcher(app::player::PlayerHsmContext* ctx, float deltaTime) 
+void drop_to_driftdash(app::player::PlayerHsmContext* ctx, float deltaTime)
 {
 	auto* HSMComp = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
 	int getID = HSMComp->GetCurrentState();
+	auto* gameManager = hh::game::GameManager::GetInstance();
+	auto* lvlInfo = gameManager->GetService<app::level::LevelInfo>();
 
 	static float DDash_Timer = 0.0f;
+	static bool Drop = 0;
 
-	if (DDash_Timer < 0.15f) {
+	if (DDash_Timer < 0.15f && getID != 111) {
 		DDash_Timer += deltaTime;
+		HSMComp->ChangeState(109, 0);
+		NOTIFY("put to drop for")
 		return;
 	}
 
+	if (DDash_Timer < 0.15f && getID == 109 || getID == 111) {
+		DDash_Timer += deltaTime;
+	}
+
 	if (DDash_Timer > 0.15f) {
-		Redirect(ctx, StateDirector::driftdash);	
+		Redirect(ctx, StateDirector::driftdash);
 		DDash_Timer = 0.0f;
 		return;
 	}
@@ -450,30 +452,47 @@ void player_common_tweak() {
 	//whiteSpace
 	params->whiteSpace.spinAttack.limitSpeedMax = 100.0f;
 	params->whiteSpace.spinAttack.brakeForce = 0.0f;
-	params->whiteSpace.driftDash.brake = 0.0f;
+	params->whiteSpace.driftDash.brake = 3.0f;
 	params->whiteSpace.driftDash.checkDashSpeed = 15.0f;
 	params->whiteSpace.driftDash.checkDashTime = 0.45f;
+	params->whiteSpace.driftDash.endSteeringSpeed = 120.0f;
+	params->whiteSpace.driftDash.maxSpeed = 100.0f;
+	params->whiteSpace.driftDash.outOfControlSpeed = 80.0f;
+	params->whiteSpace.spindash.minSpeed = 20.0f;
 	// forwardView
 	params->forwardView.spinAttack.limitSpeedMax = 80.0f;
 	params->forwardView.spinAttack.brakeForce = 0.0f;
-	params->forwardView.driftDash.brake = 0.0f;
+	params->forwardView.driftDash.brake = 3.0f;
 	params->forwardView.driftDash.checkDashSpeed = 15.0f;
 	params->forwardView.driftDash.checkDashTime = 0.45f;
+	params->forwardView.driftDash.endSteeringSpeed = 120.0f;
+	params->forwardView.driftDash.maxSpeed = 100.0f;
+	params->forwardView.driftDash.outOfControlSpeed = 80.0f;
+	params->forwardView.spindash.minSpeed = 20.0f;
 	// sideView
 	params->sideView.spinAttack.limitSpeedMax = 80.0f;
 	params->sideView.spinAttack.brakeForce = 0.0f;
-	params->sideView.driftDash.brake = 0.0f;
+	params->sideView.driftDash.brake = 3.0f;
 	params->sideView.driftDash.checkDashSpeed = 15.0f;
 	params->sideView.driftDash.checkDashTime = 0.45f;
+	params->sideView.driftDash.endSteeringSpeed = 120.0f;
+	params->sideView.driftDash.maxSpeed = 100.0f;
+	params->sideView.driftDash.outOfControlSpeed = 80.0f;
+	params->sideView.spindash.minSpeed = 20.0f;
 	// boss
 	params->boss.spinAttack.limitSpeedMax = 80.0f;
 	params->boss.spinAttack.brakeForce = 0.0f;
-	params->boss.driftDash.brake = 0.0f;
+	params->boss.driftDash.brake = 3.0f;
 	params->boss.driftDash.checkDashSpeed = 15.0f;
 	params->boss.driftDash.checkDashTime = 0.45f;
+	params->boss.driftDash.endSteeringSpeed = 120.0f;
+	params->boss.driftDash.maxSpeed = 100.0f;
+	params->boss.driftDash.outOfControlSpeed = 80.0f;
+	params->boss.spindash.minSpeed = 20.0f;
+	NOTIFY("APPLIED HARDCODE \n")
 	// ... okay maybe not that big rn, but soon it'd be BIG 
 	// or not..
-	// not used for bundled in Digital Circus
+	// should not be used for bundled dll in modpack
 }
 
 HOOK(uint64_t, __fastcall, GameModeTitleInit, 0x1401990E0, app::game::GameMode* self) {
@@ -504,7 +523,7 @@ HOOK(void, __fastcall, InitPlayer, 0x14060DBC0, hh::game::GameObject* self) {
 
 HOOK(bool, __fastcall, SpinAttackStep, 0x1406CB3E0, app::player::StateSpinAttack* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	auto* HSMComp = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
-	DDash_bounceJump_hacking(ctx, 0);
+	rolling_air_hack(ctx, 0);
 	HSMComp->ChangeState(11, 0);
 	return originalSpinAttackStep(self, ctx, deltaTime);
 }
@@ -515,30 +534,33 @@ HOOK(bool, __fastcall, StompingBounceStep, 0x1406D1620, app::player::StateStompi
 	return originalStompingBounceStep(self, ctx, deltaTime);
 }
 
-HOOK(bool, __fastcall, SlidingStep, 0x1406CC600, app::player::StateSliding* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
-	driftDashSwitcher(ctx, deltaTime);
-	return originalSlidingStep(self, ctx, deltaTime);
-}
-
 HOOK(bool, __fastcall, DriftDashStep, 0x1406AFB70, app::player::StateDriftDash* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	tryDamage(ctx, false);
-	driftdash_control(ctx);
+	driftdash_inputs(ctx);
 	return originalDriftDashStep(self, ctx, deltaTime);
 }
+
+HOOK(bool, __fastcall, DropDashStep, 0x1406AFFB0, app::player::StateDropDash* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+	drop_to_driftdash(ctx, deltaTime);
+	return originalDropDashStep(self, ctx, deltaTime);
+}
+
+HOOK(bool, __fastcall, SpinDashStep, 0x1406CB790, app::player::StateSpinDash* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+	drop_to_driftdash(ctx, deltaTime);
+	return originalSpinDashStep(self, ctx, deltaTime);
+} // don't ask me why i do this
 
 HOOK(bool, __fastcall, SlalomStep, 0x1406C9390, app::player::StateSlalomStep * self, app::player::PlayerHsmContext * ctx, float deltaTime) {
 	auto* input = ctx->playerObject->GetComponent<hh::game::GOCInput>();
 	auto* inputcomp = input->GetInputComponent();
 	if (inputcomp->actionMonitors[3].state & 256) {
-		/*ctx->blackboardStatus->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 1);
-		tryDamage(ctx);*/
 		Redirect(ctx, StateDirector::preserveboost);
 	}
 	return originalSlalomStep(self, ctx, deltaTime);
 }
 
 HOOK(bool, __fastcall, BounceJumpStep, 0x1406C1C80, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
-	bounceJump_control(ctx, deltaTime);
+	bouncejump_inputs(ctx);
 	
 	tryDamage(ctx, 0);
 	
@@ -571,9 +593,37 @@ HOOK(void, __fastcall, StateBounceJumpEnter, 0x1406C06E0, app::player::StateBoun
 
 HOOK(void, __fastcall, StateBounceJumpLeave, 0x1406C15F0, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, int nextState) {
 	jumpSpeed_func("restore");
-	DDash_bounceJump_hacking(ctx, 0);
+	rolling_air_hack(ctx, 0);
 	originalStateBounceJumpLeave(self, ctx, nextState);
 }
+
+HOOK(void, __fastcall, SlidingEnter, 0x1406CBB70, app::player::StateSliding* self, app::player::PlayerHsmContext* ctx, int previousState) {
+	auto* HSMComp = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
+
+	if (previousState == 20) {
+		HSMComp->hsm.ChangeState(111, 0);
+		NOTIFY("GOING SPIN \n")
+	}
+
+	if (previousState != 20) {
+		HSMComp->hsm.ChangeState(107, 0);
+		tryDamage(ctx, false);
+		NOTIFY("GO DRIFT \n")
+	}
+}
+
+//HOOK(void, __fastcall, SquatLeave, 0x1406CC360, app::player::StateSquat* self, app::player::PlayerHsmContext* ctx, int nextState) {
+//	auto* HSMComp = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
+//
+//	if (nextState == 57) {
+//		HSMComp->ChangeState(109, 0);
+//		NOTIFY("I MAYBE WORKED")
+//	}
+//	else {
+//		NOTIFY("SOMETHINGS WRONGG DUDDEDE")
+//		originalSquatLeave(self, ctx, nextState);
+//	}
+//}
 
 //HOOK(void, __fastcall, BindMaps, 0x140A2FEC0, hh::game::GameManager* gameManager, hh::hid::InputMapSettings* inputSettings) {
 //	inputSettings->BindActionMapping("PlayerLightDash", 0x2001du);
@@ -590,25 +640,19 @@ BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID res
 	case DLL_PROCESS_ATTACH:
 		INSTALL_HOOK(GameModeTitleInit);
 		INSTALL_HOOK(InitPlayer);
-		
 		INSTALL_HOOK(SpinAttackStep);
-		INSTALL_HOOK(SlidingStep);
+		
 		INSTALL_HOOK(DriftDashStep);
+		INSTALL_HOOK(DropDashStep);
+		INSTALL_HOOK(SpinDashStep);
 		INSTALL_HOOK(SlalomStep);
 		INSTALL_HOOK(BounceJumpStep);		
 		INSTALL_HOOK(GrindDoubleJumpStep);
 		INSTALL_HOOK(StateDriftDashLeave);
-
 		INSTALL_HOOK(StateBounceJumpEnter);
 		INSTALL_HOOK(StateBounceJumpLeave);
-
-		//INSTALL_HOOK(StompingBounceStep);
-		//INSTALL_HOOK(DropDashStep);
-		//INSTALL_HOOK(FallStep);
-		//INSTALL_HOOK(StandStep);
-		//INSTALL_HOOK(RunStep);
-		//INSTALL_HOOK(JumpStep);
-		//INSTALL_HOOK(DoubleJumpStep);
+		INSTALL_HOOK(SlidingEnter);
+		//INSTALL_HOOK(SquatLeave);
 		break;
 	case DLL_PROCESS_DETACH:
 	case DLL_THREAD_ATTACH:
