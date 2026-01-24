@@ -71,28 +71,41 @@ void tryDamage(app::player::PlayerHsmContext* ctx, bool leaveMeAlone) {
 	return;
 }
 
-void rolling_air_hack(app::player::PlayerHsmContext* ctx, bool leavemealone) {
-	auto* gameManager = hh::game::GameManager::GetInstance();
-	auto* lvlInfo = gameManager->GetService<app::level::LevelInfo>();
-	auto isGrounded = lvlInfo->playerInformation->isGrounded;
+void bounceRFL(std::string arg) {
+	auto* playerCommonRFL = hh::fnd::ResourceManager::GetInstance()->GetResource<hh::fnd::ResReflectionT<app::player::PlayerParameters>>("player_common");
+	auto* params = playerCommonRFL->GetData();
 
+	static float WS_B = 0;
+	static float FV_B = 0;
+	static float SV_B = 0;
+	static float BS_B = 0;
+
+	if (arg == "backup") {
+		WS_B = params->whiteSpace.doubleJump.bounceSpeed;
+		FV_B = params->forwardView.doubleJump.bounceSpeed;
+		SV_B = params->sideView.doubleJump.bounceSpeed;
+		BS_B = params->boss.doubleJump.bounceSpeed;
+	}
+	if (arg == "restore") {
+		params->whiteSpace.doubleJump.bounceSpeed = WS_B;
+		params->forwardView.doubleJump.bounceSpeed = FV_B;
+		params->sideView.doubleJump.bounceSpeed = SV_B;
+		params->boss.doubleJump.bounceSpeed = BS_B;
+	}
+}
+
+void rolling_air_hack(app::player::PlayerHsmContext* ctx) {
 	auto* playerCommonRFL = hh::fnd::ResourceManager::GetInstance()->GetResource<hh::fnd::ResReflectionT<app::player::PlayerParameters>>("player_common");
 	auto* params = playerCommonRFL->GetData();
 
 	csl::math::Vector4 velocity_m = ctx->gocPlayerKinematicParams->velocity;
 	float vMagnitude = velocity_m.y();
 
-	if (isGrounded == 0 && leavemealone) {
+	if (params) {
 		params->whiteSpace.doubleJump.bounceSpeed = vMagnitude*0.5f;
-		params->forwardView.doubleJump.bounceSpeed = vMagnitude;
-		params->sideView.doubleJump.bounceSpeed = vMagnitude;
-		params->boss.doubleJump.bounceSpeed = vMagnitude;
-	}
-	if (!leavemealone) {
-		params->whiteSpace.doubleJump.bounceSpeed = 25.0f;
-		params->forwardView.doubleJump.bounceSpeed = 25.0f;
-		params->sideView.doubleJump.bounceSpeed = 25.0f;
-		params->boss.doubleJump.bounceSpeed = 25.0f;
+		params->forwardView.doubleJump.bounceSpeed = vMagnitude*0.5f;
+		params->sideView.doubleJump.bounceSpeed = vMagnitude*0.5f;
+		params->boss.doubleJump.bounceSpeed = vMagnitude*0.5f;
 	}	
 }
 
@@ -109,7 +122,7 @@ void Redirect(app::player::PlayerHsmContext* ctx, StateDirector to_what)
 			break;
 		case StateDirector::bouncejump:
 			HSMComp->ChangeState(11, 0);
-			rolling_air_hack(ctx, 1);
+			rolling_air_hack(ctx);
 			tryDamage(ctx, false);
 			NOTIFY("[Shadow Moveset]: DIRECTED TO BOUNCEJUMP \n");
 			break;
@@ -275,7 +288,7 @@ void spinAttackCalculator(app::player::PlayerHsmContext* ctx) {
 	}
 }
 
-void drop_to_driftdash(app::player::PlayerHsmContext* ctx, float deltaTime)
+void drop_driftdash_transition(app::player::PlayerHsmContext* ctx, float deltaTime)
 {
 	auto* HSMComp = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
 	int getID = HSMComp->GetCurrentState();
@@ -283,7 +296,6 @@ void drop_to_driftdash(app::player::PlayerHsmContext* ctx, float deltaTime)
 	auto* lvlInfo = gameManager->GetService<app::level::LevelInfo>();
 
 	static float DDash_Timer = 0.0f;
-	static bool Drop = 0;
 
 	if (DDash_Timer < 0.15f && getID != 111) {
 		DDash_Timer += deltaTime;
@@ -499,6 +511,7 @@ HOOK(uint64_t, __fastcall, GameModeTitleInit, 0x1401990E0, app::game::GameMode* 
 	auto res = originalGameModeTitleInit(self);
 	player_common_tweak();
 	jumpSpeed_func("backup");
+
 	return res;
 }
 
@@ -507,6 +520,8 @@ HOOK(void, __fastcall, InitPlayer, 0x14060DBC0, hh::game::GameObject* self) {
 	
 	auto* BBcomp = self->GetComponent<app::player::GOCPlayerBlackboard>();
 	auto* BBstatus = BBcomp->blackboard->GetContent<app::player::BlackboardStatus>();
+
+	bounceRFL("backup");
 
 	if (BBstatus) {
 		BBstatus->SetCombatFlag(app::player::BlackboardStatus::CombatFlag::SLALOM_STEP, 1);
@@ -523,7 +538,7 @@ HOOK(void, __fastcall, InitPlayer, 0x14060DBC0, hh::game::GameObject* self) {
 
 HOOK(bool, __fastcall, SpinAttackStep, 0x1406CB3E0, app::player::StateSpinAttack* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	auto* HSMComp = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
-	rolling_air_hack(ctx, 0);
+	bounceRFL("restore");
 	HSMComp->ChangeState(11, 0);
 	return originalSpinAttackStep(self, ctx, deltaTime);
 }
@@ -541,12 +556,12 @@ HOOK(bool, __fastcall, DriftDashStep, 0x1406AFB70, app::player::StateDriftDash* 
 }
 
 HOOK(bool, __fastcall, DropDashStep, 0x1406AFFB0, app::player::StateDropDash* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
-	drop_to_driftdash(ctx, deltaTime);
+	drop_driftdash_transition(ctx, deltaTime);
 	return originalDropDashStep(self, ctx, deltaTime);
 }
 
 HOOK(bool, __fastcall, SpinDashStep, 0x1406CB790, app::player::StateSpinDash* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
-	drop_to_driftdash(ctx, deltaTime);
+	drop_driftdash_transition(ctx, deltaTime);
 	return originalSpinDashStep(self, ctx, deltaTime);
 } // don't ask me why i do this
 
@@ -579,13 +594,6 @@ HOOK(void, __fastcall, StateDriftDashLeave, 0x1406AF8D0, app::player::StateDrift
 	originalStateDriftDashLeave(self, ctx, nextState);
 }
 
-//HOOK(void, __fastcall, SpinAttackEnter, 0x1406CB150,app::player::StateSpinAttack* self, app::player::PlayerHsmContext* ctx, int nextState) {
-//	originalSpinAttackEnter(self, ctx, nextState);
-//	auto* HSMComp = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
-//	HSMComp->ChangeState(11, 0);
-//}
-
-
 HOOK(void, __fastcall, StateBounceJumpEnter, 0x1406C06E0, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, int previousState) {
 	jumpSpeed_func("apply");
 	originalStateBounceJumpEnter(self, ctx, previousState);
@@ -593,7 +601,7 @@ HOOK(void, __fastcall, StateBounceJumpEnter, 0x1406C06E0, app::player::StateBoun
 
 HOOK(void, __fastcall, StateBounceJumpLeave, 0x1406C15F0, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, int nextState) {
 	jumpSpeed_func("restore");
-	rolling_air_hack(ctx, 0);
+	bounceRFL("restore");
 	originalStateBounceJumpLeave(self, ctx, nextState);
 }
 
@@ -602,13 +610,13 @@ HOOK(void, __fastcall, SlidingEnter, 0x1406CBB70, app::player::StateSliding* sel
 
 	if (previousState == 20) {
 		HSMComp->hsm.ChangeState(111, 0);
-		NOTIFY("GOING SPIN \n")
+		NOTIFY("[Shadow Moveset]: Rolling from squat \n")
 	}
 
 	if (previousState != 20) {
 		HSMComp->hsm.ChangeState(107, 0);
 		tryDamage(ctx, false);
-		NOTIFY("GO DRIFT \n")
+		NOTIFY("[Shadow Moveset]: Rolling... \n")
 	}
 }
 
