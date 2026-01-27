@@ -13,6 +13,3 @@ IncludeDirCount=0
 DependsCount=0
 DLLFile="${PROJECT_NAME}.dll"
 CodeFile=""
-ConfigSchemaFile="config.json"
-[Options]
-BoostRecoveryByAttack=5.0

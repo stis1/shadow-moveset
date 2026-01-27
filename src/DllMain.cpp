@@ -1,8 +1,10 @@
 #define NOTIFY(str, ...) \
 	SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_GREEN | FOREGROUND_INTENSITY); \
-    printf(str, __VA_ARGS__); \
+    std::cout << "[Shadow Moveset]: " << str << "\n" << std::endl; \
     SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+#include <iostream>
 
+static Eigen::Vector4f prevVelocity;
 
 enum class StateDirector // redirect to what state (initially i named this guy StateDictator XDDD)
 {
@@ -118,47 +120,49 @@ void Redirect(app::player::PlayerHsmContext* ctx, StateDirector to_what)
 		case StateDirector::driftdash:
 			HSMComp->ChangeState(107, 0);
 			tryDamage(ctx, false);
-			NOTIFY("[Shadow Moveset]: DIRECTED TO DRIFTDASH \n");
+			NOTIFY("DIRECTED TO DRIFTDASH");
 			break;
 		case StateDirector::bouncejump:
 			HSMComp->ChangeState(11, 0);
 			rolling_air_hack(ctx);
 			tryDamage(ctx, false);
-			NOTIFY("[Shadow Moveset]: DIRECTED TO BOUNCEJUMP \n");
+			NOTIFY("DIRECTED TO BOUNCEJUMP");
 			break;
 		case StateDirector::jump:
 			HSMComp->ChangeState(9,0);
-			NOTIFY("[Shadow Moveset]: DIRECTED TO JUMP \n");
+			NOTIFY("DIRECTED TO JUMP");
 			break;
 		case StateDirector::run:
 			HSMComp->ChangeState(4, 0);
-			NOTIFY("[Shadow Moveset]: DIRECTED TO RUN \n");
+			NOTIFY("DIRECTED TO RUN");
 			break;
 		case StateDirector::boost:
 			HSMComp->ChangeState(4, 0);
 			ctx->blackboardStatus->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 1);
 			tryDamage(ctx, 0);
-			NOTIFY("[Shadow Moveset]: DIRECTED TO BOOST \n");
+			NOTIFY("DIRECTED TO BOOST");
 			break;
 		case StateDirector::homing:
 			HSMComp->ChangeState(63, 0);
-			NOTIFY("[Shadow Moveset]: HOMING SHADOW \n");
+			NOTIFY("HOMING SHADOW");
 			break;
 		case StateDirector::preserveboost: // for boosting inside slalom, maybe others, bad implementation if being honest
 			ctx->blackboardStatus->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 1);
 			tryDamage(ctx, false);
-			NOTIFY("[Shadow Moveset]: APPLIED BOOST TO SLALOM STEP \n");
+			NOTIFY("KEPT BOOST");
 			break;
 		case StateDirector::doublejump:
 			HSMComp->ChangeState(10, 0);
-			NOTIFY("[Shadow Moveset]: DIRECTED TO DOUBLE JUMP \n");
+			NOTIFY("DIRECTED TO DOUBLE JUMP");
 			break;
 		case StateDirector::stomp:
 			HSMComp->ChangeState(52, 0);
-			NOTIFY("[Shadow Moveset]: DIRECTED TO STOMP \n");
+			NOTIFY("DIRECTED TO STOMP");
+			break;
 		case StateDirector::falls:
 			HSMComp->ChangeState(15, 0);
-			NOTIFY("[Shadow Moveset]: Shadow shall fall \n");
+			NOTIFY("Shadow shall fall");
+			break;
 		default:
 			break;
 	}
@@ -185,10 +189,6 @@ void driftdash_inputs(app::player::PlayerHsmContext* ctx) {
 	}
 	if (circleTap && isGrounded == 1) {
 		Redirect(ctx, StateDirector::run);
-		return;
-	}
-	if (circleTap && isGrounded == 0) {
-		Redirect(ctx, StateDirector::falls);
 		return;
 	}
 	if (crossTap) {
@@ -507,6 +507,35 @@ void player_common_tweak() {
 	// should not be used for bundled dll in modpack
 }
 
+void pizdecSuperBiker3D(app::player::PlayerHsmContext* ctx, float deltaTime) {
+
+	const float stompStopForce = 15.0f;
+
+	csl::math::Vector4 Velocity = ctx->gocPlayerKinematicParams->velocity;
+	float Y = Velocity.y();
+	float prevX = prevVelocity.x();
+	float prevZ = prevVelocity.z();
+	std::cout << "PrevX infunc is " << prevX << "\n" << std::endl;
+	std::cout << "PrevZ infunc is " << prevZ << "\n" << std::endl;
+	Eigen::Vector4f idkVector(prevX, 0, prevZ, 0);
+	Eigen::Vector4f idkVector1(prevX, 0, prevZ, 0);
+	if (idkVector.norm() < stompStopForce * deltaTime) {
+		Velocity = Eigen::Vector4f(0, 0, 0, 0);
+	}
+	else {
+		Eigen::Vector4f idkVectornormalize = idkVector / idkVector.norm();
+		ctx->gocPlayerKinematicParams->velocity = (idkVectornormalize * (idkVector1.norm() - (stompStopForce * deltaTime)));
+		Velocity.y() = Y;
+	}
+	prevVelocity = Velocity;
+
+	std::cout << "Velocity X " << Velocity.x() << "\n" << std::endl;
+	std::cout << "Velocity Y " << Velocity.y() << "\n" << std::endl;
+	std::cout << "Velocity Z " << Velocity.z() << "\n" << std::endl;
+}
+
+
+// mainly rfl
 HOOK(uint64_t, __fastcall, GameModeTitleInit, 0x1401990E0, app::game::GameMode* self) {
 	auto res = originalGameModeTitleInit(self);
 	player_common_tweak();
@@ -525,16 +554,17 @@ HOOK(void, __fastcall, InitPlayer, 0x14060DBC0, hh::game::GameObject* self) {
 
 	if (BBstatus) {
 		BBstatus->SetCombatFlag(app::player::BlackboardStatus::CombatFlag::SLALOM_STEP, 1);
-		NOTIFY("[Shadow Moveset]: Enabled Slalom Step \n")
+		NOTIFY("Enabled Slalom Step")
 		return;
 	}
 	else {
-		NOTIFY("[Shadow Moveset]: Failed to enable Slalom step \n")
+		NOTIFY("Failed to enable Slalom step")
 		return;
 	}
 	return;
 
 }
+
 
 HOOK(bool, __fastcall, SpinAttackStep, 0x1406CB3E0, app::player::StateSpinAttack* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	auto* HSMComp = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
@@ -542,7 +572,6 @@ HOOK(bool, __fastcall, SpinAttackStep, 0x1406CB3E0, app::player::StateSpinAttack
 	HSMComp->ChangeState(11, 0);
 	return originalSpinAttackStep(self, ctx, deltaTime);
 }
-
 
 HOOK(bool, __fastcall, StompingBounceStep, 0x1406D1620, app::player::StateStompingBounce* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	Redirect(ctx, StateDirector::bouncejump);
@@ -576,10 +605,26 @@ HOOK(bool, __fastcall, SlalomStep, 0x1406C9390, app::player::StateSlalomStep * s
 
 HOOK(bool, __fastcall, BounceJumpStep, 0x1406C1C80, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	bouncejump_inputs(ctx);
-	
 	tryDamage(ctx, 0);
-	
 	return originalBounceJumpStep(self, ctx, deltaTime);
+}
+
+HOOK(void, __fastcall, EnterStompingDown, 0x14a85c590, app::player::StateStompingDown* self, app::player::PlayerHsmContext* ctx, int previousState) {
+	csl::math::Vector4 currVelocity = ctx->gocPlayerKinematicParams->velocity;
+	prevVelocity = currVelocity;
+	float prevX = prevVelocity.x();
+	float prevZ = prevVelocity.z();
+	NOTIFY("sample velocity on entrance");
+	std::cout << "PrevX Enter is " << prevX << "\n" << std::endl;
+	std::cout << "PrevZ Enter is " << prevZ << "\n" << std::endl;
+	originalEnterStompingDown(self, ctx, previousState);
+}
+
+HOOK(bool, __fastcall, StompingDownStep, 0x1406d1760, app::player::StateStompingDown* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+	NOTIFY("trying super cool thing");
+	originalStompingDownStep(self, ctx, deltaTime);
+	pizdecSuperBiker3D(ctx, deltaTime);
+	return (self, ctx, deltaTime);
 }
 
 HOOK(bool, __fastcall, GrindDoubleJumpStep, 0x1406BEAB0, app::player::StateGrindDoubleJump* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
@@ -588,19 +633,19 @@ HOOK(bool, __fastcall, GrindDoubleJumpStep, 0x1406BEAB0, app::player::StateGrind
 }
 
 HOOK(void, __fastcall, StateDriftDashLeave, 0x1406AF8D0, app::player::StateDriftDash* self, app::player::PlayerHsmContext* ctx, int nextState) {
-	auto* GOCSound = ctx->playerObject->GetComponent<hh::snd::GOCSound>();
+	//auto* GOCSound = ctx->playerObject->GetComponent<hh::snd::GOCSound>();
 	tryDamage(ctx, true);
-	GOCSound->StopAll(1);
+	//GOCSound->StopAll(1);
 	originalStateDriftDashLeave(self, ctx, nextState);
 }
 
 HOOK(void, __fastcall, StateBounceJumpEnter, 0x1406C06E0, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, int previousState) {
-	jumpSpeed_func("apply");
+	//jumpSpeed_func("apply");
 	originalStateBounceJumpEnter(self, ctx, previousState);
 }
 
 HOOK(void, __fastcall, StateBounceJumpLeave, 0x1406C15F0, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, int nextState) {
-	jumpSpeed_func("restore");
+	//jumpSpeed_func("restore");
 	bounceRFL("restore");
 	originalStateBounceJumpLeave(self, ctx, nextState);
 }
@@ -610,37 +655,15 @@ HOOK(void, __fastcall, SlidingEnter, 0x1406CBB70, app::player::StateSliding* sel
 
 	if (previousState == 20) {
 		HSMComp->hsm.ChangeState(111, 0);
-		NOTIFY("[Shadow Moveset]: Rolling from squat \n")
+		NOTIFY("Rolling from squat")
 	}
 
 	if (previousState != 20) {
 		HSMComp->hsm.ChangeState(107, 0);
 		tryDamage(ctx, false);
-		NOTIFY("[Shadow Moveset]: Rolling... \n")
+		NOTIFY("Rolling...")
 	}
 }
-
-//HOOK(void, __fastcall, SquatLeave, 0x1406CC360, app::player::StateSquat* self, app::player::PlayerHsmContext* ctx, int nextState) {
-//	auto* HSMComp = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
-//
-//	if (nextState == 57) {
-//		HSMComp->ChangeState(109, 0);
-//		NOTIFY("I MAYBE WORKED")
-//	}
-//	else {
-//		NOTIFY("SOMETHINGS WRONGG DUDDEDE")
-//		originalSquatLeave(self, ctx, nextState);
-//	}
-//}
-
-//HOOK(void, __fastcall, BindMaps, 0x140A2FEC0, hh::game::GameManager* gameManager, hh::hid::InputMapSettings* inputSettings) {
-//	inputSettings->BindActionMapping("PlayerLightDash", 0x2001du);
-//	originalBindMaps(gameManager, inputSettings);
-//}
-// 
-//0x140684B80 for ascending Shadow XDDD
-//0x1406985B0 is right one
-//got the wrong address and Shadow ascended
 BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID reserved)
 {
 	switch (reason)
@@ -654,13 +677,16 @@ BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID res
 		INSTALL_HOOK(DropDashStep);
 		INSTALL_HOOK(SpinDashStep);
 		INSTALL_HOOK(SlalomStep);
-		INSTALL_HOOK(BounceJumpStep);		
+		INSTALL_HOOK(BounceJumpStep);	
+		INSTALL_HOOK(EnterStompingDown);
+		INSTALL_HOOK(StompingDownStep);
+
 		INSTALL_HOOK(GrindDoubleJumpStep);
 		INSTALL_HOOK(StateDriftDashLeave);
 		INSTALL_HOOK(StateBounceJumpEnter);
 		INSTALL_HOOK(StateBounceJumpLeave);
 		INSTALL_HOOK(SlidingEnter);
-		//INSTALL_HOOK(SquatLeave);
+		
 		break;
 	case DLL_PROCESS_DETACH:
 	case DLL_THREAD_ATTACH:
