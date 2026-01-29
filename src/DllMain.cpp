@@ -552,10 +552,10 @@ void Bouncinggg(std::string arg) {
 		return;
 	}
 	if (arg == "apply") {
-		params->whiteSpace.jumpSpeed.minStickSpeed = SampleHorSpeed;
-		params->forwardView.jumpSpeed.minStickSpeed = SampleHorSpeed;
-		params->sideView.jumpSpeed.minStickSpeed = SampleHorSpeed;
-		params->boss.jumpSpeed.minStickSpeed = SampleHorSpeed;
+		params->whiteSpace.jumpSpeed.minStickSpeed = SampleSpeed;
+		params->forwardView.jumpSpeed.minStickSpeed = SampleSpeed;
+		params->sideView.jumpSpeed.minStickSpeed = SampleSpeed;
+		params->boss.jumpSpeed.minStickSpeed = SampleSpeed;
 		return;
 	}
 }
@@ -576,7 +576,6 @@ HOOK(void, __fastcall, InitPlayer, 0x14060DBC0, hh::game::GameObject* self) {
 	//player_common_tweak();
 	jumpSpeed_func("backup");
 	bounceRFL("backup");
-
 	if (BBstatus) {
 		BBstatus->SetCombatFlag(app::player::BlackboardStatus::CombatFlag::SLALOM_STEP, 1);
 		NOTIFY("Enabled Slalom Step")
@@ -587,7 +586,6 @@ HOOK(void, __fastcall, InitPlayer, 0x14060DBC0, hh::game::GameObject* self) {
 		return;
 	}
 	return;
-
 }
 
 
