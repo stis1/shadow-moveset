@@ -539,15 +539,15 @@ void pizdecSuperBiker3D(app::player::PlayerHsmContext* ctx, float deltaTime) {
 void Bouncinggg(std::string arg) {
 	auto* gameManager = hh::game::GameManager::GetInstance();
 	auto* lvlInfo = gameManager->GetService<app::level::LevelInfo>();
-	auto horSpeed = lvlInfo->playerInformation->horizontalSpeed;
+	auto Speed = lvlInfo->playerInformation->Speed;
 
 	auto* playerCommonRFL = hh::fnd::ResourceManager::GetInstance()->GetResource<hh::fnd::ResReflectionT<app::player::PlayerParameters>>("player_common");
 	auto* params = playerCommonRFL->GetData();
-	static float SampleHorSpeed = 0;
+	static float SampleSpeed = 0;
 
 	if (arg == "sample") {
-		if (horSpeed.has_value()) {
-			SampleHorSpeed = horSpeed.value();
+		if (Speed.has_value()) {
+			SampleSpeed = Speed.value();
 		}
 		return;
 	}
