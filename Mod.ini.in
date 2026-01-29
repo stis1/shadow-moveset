@@ -1,5 +1,5 @@
 [Desc]
-Version="${PROJECT_VERSION}"
+Version="${PROJECT_BUILD_DATE}"
 Author="${PROJECT_AUTHOR}"
 Title="${PROJECT_DESCRIPTION}"
 Description="${PROJECT_LONG_DESCRIPTION}"
@@ -9,7 +9,8 @@ AuthorURL="${PROJECT_AUTHOR_URL}"
 UpdateServer="${PROJECT_UPDATE_SERVER}"
 SaveFile=""
 ID="${PROJECT_AUTHOR}.${PROJECT_NAME}"
-IncludeDirCount=0
+IncludeDirCount=1
+IncludeDir0="."
 DependsCount=0
 DLLFile="${PROJECT_NAME}.dll"
 CodeFile=""

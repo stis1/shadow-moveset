@@ -3,6 +3,7 @@
     std::cout << "[Shadow Moveset]: " << str << "\n" << std::endl; \
     SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
 #include <iostream>
+#include <optional>
 
 static Eigen::Vector4f prevVelocity;
 
@@ -519,12 +520,13 @@ void pizdecSuperBiker3D(app::player::PlayerHsmContext* ctx, float deltaTime) {
 	std::cout << "PrevZ infunc is " << prevZ << "\n" << std::endl;
 	Eigen::Vector4f idkVector(prevX, 0, prevZ, 0);
 	Eigen::Vector4f idkVector1(prevX, 0, prevZ, 0);
+
 	if (idkVector.norm() < stompStopForce * deltaTime) {
 		Velocity = Eigen::Vector4f(0, 0, 0, 0);
 	}
 	else {
 		Eigen::Vector4f idkVectornormalize = idkVector / idkVector.norm();
-		ctx->gocPlayerKinematicParams->velocity = (idkVectornormalize * (idkVector1.norm() - (stompStopForce * deltaTime)));
+		ctx->gocPlayerKinematicParams->velocity = (idkVectornormalize * (idkVector.norm() - (stompStopForce * deltaTime)));
 		Velocity.y() = Y;
 	}
 	prevVelocity = Velocity;
@@ -534,13 +536,34 @@ void pizdecSuperBiker3D(app::player::PlayerHsmContext* ctx, float deltaTime) {
 	std::cout << "Velocity Z " << Velocity.z() << "\n" << std::endl;
 }
 
+void Bouncinggg(std::string arg) {
+	auto* gameManager = hh::game::GameManager::GetInstance();
+	auto* lvlInfo = gameManager->GetService<app::level::LevelInfo>();
+	auto horSpeed = lvlInfo->playerInformation->horizontalSpeed;
+
+	auto* playerCommonRFL = hh::fnd::ResourceManager::GetInstance()->GetResource<hh::fnd::ResReflectionT<app::player::PlayerParameters>>("player_common");
+	auto* params = playerCommonRFL->GetData();
+	static float SampleHorSpeed = 0;
+
+	if (arg == "sample") {
+		if (horSpeed.has_value()) {
+			SampleHorSpeed = horSpeed.value();
+		}
+		return;
+	}
+	if (arg == "apply") {
+		params->whiteSpace.jumpSpeed.minStickSpeed = SampleHorSpeed;
+		params->forwardView.jumpSpeed.minStickSpeed = SampleHorSpeed;
+		params->sideView.jumpSpeed.minStickSpeed = SampleHorSpeed;
+		params->boss.jumpSpeed.minStickSpeed = SampleHorSpeed;
+		return;
+	}
+}
 
 // mainly rfl
 HOOK(uint64_t, __fastcall, GameModeTitleInit, 0x1401990E0, app::game::GameMode* self) {
 	auto res = originalGameModeTitleInit(self);
-	player_common_tweak();
-	jumpSpeed_func("backup");
-
+	NOTIFY("IN MENU");
 	return res;
 }
 
@@ -549,7 +572,9 @@ HOOK(void, __fastcall, InitPlayer, 0x14060DBC0, hh::game::GameObject* self) {
 	
 	auto* BBcomp = self->GetComponent<app::player::GOCPlayerBlackboard>();
 	auto* BBstatus = BBcomp->blackboard->GetContent<app::player::BlackboardStatus>();
-
+	
+	//player_common_tweak();
+	jumpSpeed_func("backup");
 	bounceRFL("backup");
 
 	if (BBstatus) {
@@ -604,6 +629,8 @@ HOOK(bool, __fastcall, SlalomStep, 0x1406C9390, app::player::StateSlalomStep * s
 }
 
 HOOK(bool, __fastcall, BounceJumpStep, 0x1406C1C80, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+	
+	
 	bouncejump_inputs(ctx);
 	tryDamage(ctx, 0);
 	return originalBounceJumpStep(self, ctx, deltaTime);
@@ -617,6 +644,7 @@ HOOK(void, __fastcall, EnterStompingDown, 0x14a85c590, app::player::StateStompin
 	NOTIFY("sample velocity on entrance");
 	std::cout << "PrevX Enter is " << prevX << "\n" << std::endl;
 	std::cout << "PrevZ Enter is " << prevZ << "\n" << std::endl;
+	Bouncinggg("sample");
 	originalEnterStompingDown(self, ctx, previousState);
 }
 
@@ -640,12 +668,20 @@ HOOK(void, __fastcall, StateDriftDashLeave, 0x1406AF8D0, app::player::StateDrift
 }
 
 HOOK(void, __fastcall, StateBounceJumpEnter, 0x1406C06E0, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, int previousState) {
-	//jumpSpeed_func("apply");
+	std::cout << "Bounce previous State " << previousState << "\n" << std::endl;
+	if (previousState == 55) {
+		Bouncinggg("apply"); // if bouncing, then we hack to retain velocity
+		NOTIFY("hacking bounce speed");
+	}
+	else {
+		jumpSpeed_func("apply");
+		NOTIFY("or.. not");
+	}
 	originalStateBounceJumpEnter(self, ctx, previousState);
 }
 
 HOOK(void, __fastcall, StateBounceJumpLeave, 0x1406C15F0, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, int nextState) {
-	//jumpSpeed_func("restore");
+	jumpSpeed_func("restore");
 	bounceRFL("restore");
 	originalStateBounceJumpLeave(self, ctx, nextState);
 }
@@ -664,6 +700,21 @@ HOOK(void, __fastcall, SlidingEnter, 0x1406CBB70, app::player::StateSliding* sel
 		NOTIFY("Rolling...")
 	}
 }
+
+HOOK(bool, __fastcall, StompingLandStep, 0x1406d1d30, app::player::StateStompingLand* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+	auto* input = ctx->playerObject->GetComponent<hh::game::GOCInput>();
+	auto* inputcomp = input->GetInputComponent();
+	auto* HSMComp = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
+	if (inputcomp->actionMonitors[7].state & 256) {
+		HSMComp->ChangeState(11,0);
+	}
+	else
+	{
+		originalStompingLandStep(self, ctx, deltaTime);
+	}
+	return self, ctx, deltaTime;
+}
+
 BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID reserved)
 {
 	switch (reason)
@@ -672,7 +723,6 @@ BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID res
 		INSTALL_HOOK(GameModeTitleInit);
 		INSTALL_HOOK(InitPlayer);
 		INSTALL_HOOK(SpinAttackStep);
-		
 		INSTALL_HOOK(DriftDashStep);
 		INSTALL_HOOK(DropDashStep);
 		INSTALL_HOOK(SpinDashStep);
@@ -680,13 +730,12 @@ BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID res
 		INSTALL_HOOK(BounceJumpStep);	
 		INSTALL_HOOK(EnterStompingDown);
 		INSTALL_HOOK(StompingDownStep);
-
 		INSTALL_HOOK(GrindDoubleJumpStep);
 		INSTALL_HOOK(StateDriftDashLeave);
 		INSTALL_HOOK(StateBounceJumpEnter);
 		INSTALL_HOOK(StateBounceJumpLeave);
 		INSTALL_HOOK(SlidingEnter);
-		
+		INSTALL_HOOK(StompingLandStep);
 		break;
 	case DLL_PROCESS_DETACH:
 	case DLL_THREAD_ATTACH:
