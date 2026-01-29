@@ -22,7 +22,7 @@ Now let CMake do its thing:
 cmake -A x64 -B build
 ```
 
-If you have Sonic Frontiers installed in a non-standard location, you can specify that location
+If you have Shadow Generations installed in a non-standard location, you can specify that location
 with the `GAME_FOLDER` variable:
 
 ```sh
