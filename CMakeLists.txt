@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(shadow-moveset VERSION 27.01.26
+project(shadow-moveset VERSION ${PROJECT_BUILD_DATE} 
                  DESCRIPTION "Shadow Moveset"
                  LANGUAGES CXX)
 
