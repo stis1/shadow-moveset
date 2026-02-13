@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(shadow-moveset VERSION ${PROJECT_BUILD_DATE} 
+project(shadow-moveset VERSION 0.0.1 
                  DESCRIPTION "Shadow Moveset"
                  LANGUAGES CXX)
 
@@ -10,7 +10,7 @@ set(PROJECT_AUTHOR_URL "https://github.com/stis1")
 set(PROJECT_UPDATE_SERVER "https://raw.githubusercontent.com/stis1/mod_update/main/shadow-moveset/")
 option(INSTALL_TO_UPDATE_SERVER "Install to update server" OFF)
 set(UPDATE_SERVER_PATH "" CACHE PATH "Path to update server")
-string(TIMESTAMP PROJECT_BUILD_DATE "%Y-%m-%d")
+string(TIMESTAMP PROJECT_BUILD_DATE "%d.%m.%Y")
 
 set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug,RelWithDebInfo>:EditAndContinue>")
 
