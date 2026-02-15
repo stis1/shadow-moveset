@@ -10,9 +10,9 @@ static Eigen::Vector4f prevVelocity;
 static bool WantToBounce = false;
 
 //
-csl::math::Vector2 deadZone(0, 0);
-static float rollingAirMultiplier = 0;
-static float fallToRollAtitude = 0;
+csl::math::Vector2 deadZone(0.09f, 0.09f);
+static float rollingAirMultiplier = 0.5f;
+static float fallToRollAtitude = 1.2f;
 //static float bounceBreakForce = 0;
 //
 
@@ -55,9 +55,6 @@ void setPhysicsVariables() {
 }
 //
 
-auto* pParams = hh::fnd::ResourceManager::GetInstance()->GetResource<hh::fnd::ResReflectionT<app::player::PlayerParameters>>("player_common")->GetData();
-auto* pLvlInfo = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>();
-
 enum class StateDirector // redirect to what state (initially i named this guy StateDictator XDDD)
 {
 	driftdash,
@@ -84,8 +81,6 @@ void checkHomingReticle() {
 	auto* pGameManager = hh::game::GameManager::GetInstance();
 	auto* pCursor = pGameManager->gameObjectLayers[19]->objects[0];
 	//auto* pGOCTinyFsm = pCursor->GetComponent<app_cmn::fsm::GOCTinyFsm2>();
-
-
 }
 
 void tryDamage(app::player::PlayerHsmContext* ctx, bool leaveMeAlone) {
@@ -132,6 +127,7 @@ void tryDamage(app::player::PlayerHsmContext* ctx, bool leaveMeAlone) {
 }
 
 void bounceRFL(std::string arg) {
+	auto* pParams = hh::fnd::ResourceManager::GetInstance()->GetResource<hh::fnd::ResReflectionT<app::player::PlayerParameters>>("player_common")->GetData();
 	static float WS_B = 0;
 	static float FV_B = 0;
 	static float SV_B = 0;
@@ -152,6 +148,7 @@ void bounceRFL(std::string arg) {
 }
 
 void rolling_air_hack(app::player::PlayerHsmContext* ctx) {
+	auto* pParams = hh::fnd::ResourceManager::GetInstance()->GetResource<hh::fnd::ResReflectionT<app::player::PlayerParameters>>("player_common")->GetData();
 	csl::math::Vector4 velocity_m = ctx->gocPlayerKinematicParams->velocity;
 	float vMagnitude = velocity_m.y();
 
@@ -222,6 +219,7 @@ void Redirect(app::player::PlayerHsmContext* ctx, StateDirector to_what)
 
 void driftdash_inputs(app::player::PlayerHsmContext* ctx) {
 	auto* pGOCInput = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent();
+	auto* pLvlInfo = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>();
 	auto isGrounded = pLvlInfo->playerInformation->isGrounded;
 
 	// player input
@@ -266,8 +264,10 @@ void driftdash_inputs(app::player::PlayerHsmContext* ctx) {
 }
 
 void bouncejump_inputs(app::player::PlayerHsmContext* ctx) {
+	auto* pLvlInfo = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>();
 	auto* pGOCInput = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent();
 	auto* pGOCPlayerHSM = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
+	float Speed = pLvlInfo->playerInformation->Speed.value();
 
 	if (pGOCInput->actionMonitors[1].state & 512) {
 		Redirect(ctx, StateDirector::homing);
@@ -278,7 +278,7 @@ void bouncejump_inputs(app::player::PlayerHsmContext* ctx) {
 	if (pGOCInput->actionMonitors[7].state & 512) {
 		pGOCPlayerHSM->ChangeState(52, 0);
 	}
-	if (pGOCInput->actionMonitors[3].state & 256) {
+	if (pGOCInput->actionMonitors[3].state & 256 && Speed > 45) {
 		Redirect(ctx, StateDirector::preserveboost);
 	}
 	//if (inputcomp->actionMonitors[7].state & 256 && Timer > 0.15f) {
@@ -338,6 +338,7 @@ void drop_driftdash_transition(app::player::PlayerHsmContext* ctx, float deltaTi
 }
 
 void jumpSpeed_func(std::string arg) {
+	auto* pParams = hh::fnd::ResourceManager::GetInstance()->GetResource<hh::fnd::ResReflectionT<app::player::PlayerParameters>>("player_common")->GetData();
 	if (pParams) 
 	{
 		struct jumpSpeedParams {
@@ -479,6 +480,7 @@ void jumpSpeed_func(std::string arg) {
 
 // !!! big func, don't open it !!! 
 void player_common_tweak() {
+	auto* pParams = hh::fnd::ResourceManager::GetInstance()->GetResource<hh::fnd::ResReflectionT<app::player::PlayerParameters>>("player_common")->GetData();
 	//whiteSpace
 	pParams->whiteSpace.spinAttack.limitSpeedMax = 100.0f;
 	pParams->whiteSpace.spinAttack.brakeForce = 0.0f;
@@ -526,6 +528,7 @@ void player_common_tweak() {
 }
 
 void pizdecSuperBiker3D(app::player::PlayerHsmContext* ctx, float deltaTime) {
+	
 	csl::math::Vector4 Velocity = ctx->gocPlayerKinematicParams->velocity;
 	float Y = Velocity.y();
 	
@@ -534,7 +537,6 @@ void pizdecSuperBiker3D(app::player::PlayerHsmContext* ctx, float deltaTime) {
 	float prevX = prevVelocity.x();
 	float prevZ = prevVelocity.z();
 	csl::math::Vector4 horVector(prevX, 0, prevZ, 0);
-	
 	#if _DEBUG
 	std::cout << "PrevX infunc is " << prevX << std::endl;
 	std::cout << "PrevZ infunc is " << prevZ << std::endl;
@@ -544,13 +546,11 @@ void pizdecSuperBiker3D(app::player::PlayerHsmContext* ctx, float deltaTime) {
 		Velocity = csl::math::Vector4(0, 0, 0, 0);
 	}
 	else {
-
 		Eigen::Vector4f horVectornormalize = horVector / horVector.norm();
-		Velocity = (horVectornormalize * (horVector.norm() - (bounceBreakForce * deltaTime)));
+		ctx->gocPlayerKinematicParams->velocity = (horVectornormalize * (horVector.norm() - (bounceBreakForce * deltaTime)));
 		Velocity.y() = Y;
 	}
 	prevVelocity = Velocity;
-
 	#if _DEBUG
 	std::cout << "Velocity X " << Velocity.x() << std::endl;
 	std::cout << "Velocity Y " << Velocity.y() << std::endl;
@@ -559,6 +559,8 @@ void pizdecSuperBiker3D(app::player::PlayerHsmContext* ctx, float deltaTime) {
 }
 
 void Bouncinggg(std::string arg) {
+	auto* pParams = hh::fnd::ResourceManager::GetInstance()->GetResource<hh::fnd::ResReflectionT<app::player::PlayerParameters>>("player_common")->GetData();
+	auto* pLvlInfo = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>();
 	float Speed = pLvlInfo->playerInformation->Speed.value();
 	static float SampleSpeed = 0;
 
@@ -590,7 +592,7 @@ HOOK(void, __fastcall, InitPlayer, 0x14060DBC0, hh::game::GameObject* self) {
 	//player_common_tweak();
 	jumpSpeed_func("backup");
 	bounceRFL("backup");
-	setPhysicsVariables();
+	//setPhysicsVariables();
 	if (pBBstatus) {
 		pBBstatus->SetCombatFlag(app::player::BlackboardStatus::CombatFlag::SLALOM_STEP, 1);
 		NOTIFY("Enabled Slalom Step")
@@ -661,8 +663,9 @@ HOOK(void, __fastcall, EnterStompingDown, 0x14a85c590, app::player::StateStompin
 	float prevX = prevVelocity.x();
 	float prevZ = prevVelocity.z();
 	
-	#if _DEBUG
+	
 	NOTIFY("sample velocity on EnterStateStompingDown");
+	#if _DEBUG
 	std::cout << "PrevX Enter is " << prevX << std::endl;
 	std::cout << "PrevZ Enter is " << prevZ << std::endl;
 	#endif
@@ -677,6 +680,7 @@ HOOK(void, __fastcall, EnterStompingDown, 0x14a85c590, app::player::StateStompin
 
 HOOK(bool, __fastcall, StompingDownStep, 0x1406d1760, app::player::StateStompingDown* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	auto* pGOCInput = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent();
+	auto* pLvlInfo = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>();
 	csl::math::Vector2 currentInput = pLvlInfo->playerInformation->leftStickInput.value();
 
 	originalStompingDownStep(self, ctx, deltaTime);
@@ -687,9 +691,6 @@ HOOK(bool, __fastcall, StompingDownStep, 0x1406d1760, app::player::StateStomping
 	}
 	if (currentInput.norm() < deadZone.norm()) {
 		WantToBounce = false;
-	}
-	if (!WantToBounce) {
-		jumpSpeed_func("apply");
 	}
 	return (self, ctx, deltaTime);
 }
@@ -705,6 +706,7 @@ HOOK(void, __fastcall, StateDriftDashLeave, 0x1406AF8D0, app::player::StateDrift
 }
 
 HOOK(void, __fastcall, StateBounceJumpEnter, 0x1406C06E0, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, int previousState) {
+	auto* pLvlInfo = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>();
 	csl::math::Vector2 currentInput = pLvlInfo->playerInformation->leftStickInput.value();
 	
 	std::cout << "Bounce previous State " << previousState << std::endl;
