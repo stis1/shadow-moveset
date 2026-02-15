@@ -1,11 +1,61 @@
 #define NOTIFY(str, ...) \
 	SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_GREEN | FOREGROUND_INTENSITY); \
-    std::cout << "[Shadow Moveset]: " << str << "\n" << std::endl; \
+    std::cout << "[Shadow Moveset]: " << str << std::endl; \
     SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
 #include <iostream>
 #include <optional>
+#include <fstream>
 
 static Eigen::Vector4f prevVelocity;
+static bool WantToBounce = false;
+
+//
+csl::math::Vector2 deadZone(0, 0);
+static float rollingAirMultiplier = 0;
+static float fallToRollAtitude = 0;
+static float bounceBreakForce = 0;
+//
+void setPhysicsVariables() {
+	std::ifstream ifs{ "mod.ini" };
+	std::string line{};
+
+	while (std::getline(ifs, line)) {
+		if (line.starts_with("deadZone=")) {
+			std::string diff{ line.substr(strlen("deadZone=")) };
+			std::istringstream iss{ diff };
+			iss >> deadZone.x();
+			iss >> deadZone.y();
+			NOTIFY("deadzone setup");
+			std::cout << "[Shadow Moveset]: Stomp deadzone " << deadZone.x() << std::endl;
+		}
+		if (line.starts_with("rollingAirMultiplier=")) {
+			std::string diff{ line.substr(strlen("rollingAirMultiplier=")) };
+			std::istringstream iss{ diff };
+			iss >> rollingAirMultiplier;
+			NOTIFY("rollingAirMultiplier setup");
+			std::cout << "[Shadow Moveset]: Rolling Air Multiplier " << rollingAirMultiplier << std::endl;
+		}
+		if (line.starts_with("fallToRollAtitude=")) {
+			std::string diff{ line.substr(strlen("fallToRollAtitude=")) };
+			std::istringstream iss{ diff };
+			iss >> fallToRollAtitude;
+			NOTIFY("fallToRollAtitude setup");
+			std::cout << "[Shadow Moveset]: Fall to Roll atitude " << fallToRollAtitude << std::endl;
+		}
+		return;
+		//if (line.starts_with("bounceBreakForce=")) {
+		//	std::string diff{ line.substr(strlen("bounceBreakForce=")) };
+		//	std::istringstream iss{ diff };
+		//	iss >> bounceBreakForce;
+		//	NOTIFY("Bounce break setup");
+		//	std::cout << "[Shadow Moveset]: Bounce Break  " << bounceBreakForce << std::endl;
+		//}
+	}
+}
+//
+
+auto* pParams = hh::fnd::ResourceManager::GetInstance()->GetResource<hh::fnd::ResReflectionT<app::player::PlayerParameters>>("player_common")->GetData();
+auto* pLvlInfo = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>();
 
 enum class StateDirector // redirect to what state (initially i named this guy StateDictator XDDD)
 {
@@ -29,21 +79,27 @@ void WriteProtected(uintptr_t address, T value) {
 	VirtualProtect(reinterpret_cast<void*>(address), sizeof(T), oldProtect, &oldProtect);
 }
 
+void checkHomingReticle() {
+	auto* pGameManager = hh::game::GameManager::GetInstance();
+	auto* pCursor = pGameManager->gameObjectLayers[19]->objects[0];
+	//auto* pGOCTinyFsm = pCursor->GetComponent<app_cmn::fsm::GOCTinyFsm2>();
+
+
+}
+
 void tryDamage(app::player::PlayerHsmContext* ctx, bool leaveMeAlone) {
-	auto* collision = ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>();
-	auto* BBbattle = ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardBattle>();
-	auto* BBstatus = ctx->blackboardStatus;
-	auto* HSMComp = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
+	auto* pPluginCollision = ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>();
+	auto* pBBbattle = ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardBattle>();
+	auto* pGOCPlayerHsm = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
 
 	static bool isInBallState = false;
 
-	bool isBoosting = BBstatus->GetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST);
-
-	int getID = HSMComp->GetCurrentState();
+	bool isBoosting = ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardStatus>()->GetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST);
+	int getID = pGOCPlayerHsm->GetCurrentState();
 
 	if (leaveMeAlone == true) {
-		collision->SetTypeAndRadius(2, 0);
-		BBbattle->SetFlag020(true);
+		pPluginCollision->SetTypeAndRadius(2, 0);
+		pBBbattle->SetFlag020(true);
 		return;
 	}
 
@@ -55,96 +111,89 @@ void tryDamage(app::player::PlayerHsmContext* ctx, bool leaveMeAlone) {
 	}
 
 	if (isBoosting || isInBallState) {
-		collision->SetTypeAndRadius(2, 1);
-		BBbattle->SetFlag020(false);
+		pPluginCollision->SetTypeAndRadius(2, 1);
+		pBBbattle->SetFlag020(false);
 		return;
 	}
 	if (getID == 11) {
-		collision->SetTypeAndRadius(1, 1);
-		BBbattle->SetFlag020(false);
+		pPluginCollision->SetTypeAndRadius(1, 1);
+		pBBbattle->SetFlag020(false);
 		return;
 	}
 	if (!isBoosting && !isInBallState)
 	{
 		//collision->SetTypeAndRadius(1, 0);
-		collision->SetTypeAndRadius(2, 0);
-		BBbattle->SetFlag020(true);
+		pPluginCollision->SetTypeAndRadius(2, 0);
+		pBBbattle->SetFlag020(true);
 		return;
 	}
 	return;
 }
 
 void bounceRFL(std::string arg) {
-	auto* playerCommonRFL = hh::fnd::ResourceManager::GetInstance()->GetResource<hh::fnd::ResReflectionT<app::player::PlayerParameters>>("player_common");
-	auto* params = playerCommonRFL->GetData();
-
 	static float WS_B = 0;
 	static float FV_B = 0;
 	static float SV_B = 0;
 	static float BS_B = 0;
 
 	if (arg == "backup") {
-		WS_B = params->whiteSpace.doubleJump.bounceSpeed;
-		FV_B = params->forwardView.doubleJump.bounceSpeed;
-		SV_B = params->sideView.doubleJump.bounceSpeed;
-		BS_B = params->boss.doubleJump.bounceSpeed;
+		WS_B = pParams->whiteSpace.doubleJump.bounceSpeed;
+		FV_B = pParams->forwardView.doubleJump.bounceSpeed;
+		SV_B = pParams->sideView.doubleJump.bounceSpeed;
+		BS_B = pParams->boss.doubleJump.bounceSpeed;
 	}
 	if (arg == "restore") {
-		params->whiteSpace.doubleJump.bounceSpeed = WS_B;
-		params->forwardView.doubleJump.bounceSpeed = FV_B;
-		params->sideView.doubleJump.bounceSpeed = SV_B;
-		params->boss.doubleJump.bounceSpeed = BS_B;
+		pParams->whiteSpace.doubleJump.bounceSpeed = WS_B;
+		pParams->forwardView.doubleJump.bounceSpeed = FV_B;
+		pParams->sideView.doubleJump.bounceSpeed = SV_B;
+		pParams->boss.doubleJump.bounceSpeed = BS_B;
 	}
 }
 
 void rolling_air_hack(app::player::PlayerHsmContext* ctx) {
-	auto* playerCommonRFL = hh::fnd::ResourceManager::GetInstance()->GetResource<hh::fnd::ResReflectionT<app::player::PlayerParameters>>("player_common");
-	auto* params = playerCommonRFL->GetData();
-
 	csl::math::Vector4 velocity_m = ctx->gocPlayerKinematicParams->velocity;
 	float vMagnitude = velocity_m.y();
 
-	if (params) {
-		params->whiteSpace.doubleJump.bounceSpeed = vMagnitude*0.5f;
-		params->forwardView.doubleJump.bounceSpeed = vMagnitude*0.5f;
-		params->sideView.doubleJump.bounceSpeed = vMagnitude*0.5f;
-		params->boss.doubleJump.bounceSpeed = vMagnitude*0.5f;
+	if (pParams) {
+		pParams->whiteSpace.doubleJump.bounceSpeed = vMagnitude*rollingAirMultiplier;
+		pParams->forwardView.doubleJump.bounceSpeed = vMagnitude*rollingAirMultiplier;
+		pParams->sideView.doubleJump.bounceSpeed = vMagnitude*rollingAirMultiplier;
+		pParams->boss.doubleJump.bounceSpeed = vMagnitude*rollingAirMultiplier;
 	}	
 }
 
 void Redirect(app::player::PlayerHsmContext* ctx, StateDirector to_what)
 {
-	auto* HSMComp = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
-	auto* GOCSound = ctx->playerObject->GetComponent<hh::snd::GOCSound>();
+	auto* pGOCPlayerHsm = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
 	switch (to_what) 
 	{
 		case StateDirector::driftdash:
-			HSMComp->ChangeState(107, 0);
+			pGOCPlayerHsm->ChangeState(107, 0);
 			tryDamage(ctx, false);
 			NOTIFY("DIRECTED TO DRIFTDASH");
 			break;
 		case StateDirector::bouncejump:
-			HSMComp->ChangeState(11, 0);
+			pGOCPlayerHsm->ChangeState(11, 0);
 			rolling_air_hack(ctx);
 			tryDamage(ctx, false);
 			NOTIFY("DIRECTED TO BOUNCEJUMP");
 			break;
 		case StateDirector::jump:
-			HSMComp->ChangeState(9,0);
+			pGOCPlayerHsm->ChangeState(9,0);
 			NOTIFY("DIRECTED TO JUMP");
 			break;
 		case StateDirector::run:
-			HSMComp->ChangeState(4, 0);
+			pGOCPlayerHsm->ChangeState(4, 0);
 			NOTIFY("DIRECTED TO RUN");
 			break;
 		case StateDirector::boost:
-			HSMComp->ChangeState(4, 0);
+			pGOCPlayerHsm->ChangeState(4, 0);
 			ctx->blackboardStatus->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 1);
 			tryDamage(ctx, 0);
 			NOTIFY("DIRECTED TO BOOST");
 			break;
 		case StateDirector::homing:
-			HSMComp->ChangeState(63, 0);
+			pGOCPlayerHsm->ChangeState(63, 0);
 			NOTIFY("HOMING SHADOW");
 			break;
 		case StateDirector::preserveboost: // for boosting inside slalom, maybe others, bad implementation if being honest
@@ -153,15 +202,15 @@ void Redirect(app::player::PlayerHsmContext* ctx, StateDirector to_what)
 			NOTIFY("KEPT BOOST");
 			break;
 		case StateDirector::doublejump:
-			HSMComp->ChangeState(10, 0);
+			pGOCPlayerHsm->ChangeState(10, 0);
 			NOTIFY("DIRECTED TO DOUBLE JUMP");
 			break;
 		case StateDirector::stomp:
-			HSMComp->ChangeState(52, 0);
+			pGOCPlayerHsm->ChangeState(52, 0);
 			NOTIFY("DIRECTED TO STOMP");
 			break;
 		case StateDirector::falls:
-			HSMComp->ChangeState(15, 0);
+			pGOCPlayerHsm->ChangeState(15, 0);
 			NOTIFY("Shadow shall fall");
 			break;
 		default:
@@ -171,24 +220,21 @@ void Redirect(app::player::PlayerHsmContext* ctx, StateDirector to_what)
 }
 
 void driftdash_inputs(app::player::PlayerHsmContext* ctx) {
-	auto* input = ctx->playerObject->GetComponent<hh::game::GOCInput>();
-	auto* inputcomp = input->GetInputComponent();
-	auto* gameManager = hh::game::GameManager::GetInstance();
-	auto* lvlInfo = gameManager->GetService<app::level::LevelInfo>();
-	auto isGrounded = lvlInfo->playerInformation->isGrounded;
+	auto* pGOCInput = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent();
+	auto isGrounded = pLvlInfo->playerInformation->isGrounded;
 
 	// player input
-	bool boostHeld = inputcomp->actionMonitors[3].state & 256; // 3 is action, 256 or 512 is whether held or tapped
-	bool boostTap = inputcomp->actionMonitors[3].state & 512;
-	bool circleTap = inputcomp->actionMonitors[7].state & 512;
-	bool crossTap = inputcomp->actionMonitors[0].state & 512;
-	bool squareTap = inputcomp->actionMonitors[1].state & 512;
+	bool boostHeld = pGOCInput->actionMonitors[3].state & 256; // 3 is action, 256 or 512 is whether held or tapped
+	bool boostTap = pGOCInput->actionMonitors[3].state & 512;
+	bool circleTap = pGOCInput->actionMonitors[7].state & 512;
+	bool crossTap = pGOCInput->actionMonitors[0].state & 512;
+	bool squareTap = pGOCInput->actionMonitors[1].state & 512;
 
 	if (isGrounded == 0) {
 		Redirect(ctx, StateDirector::bouncejump);
 		return;
 	}
-	if (circleTap && isGrounded == 1) {
+	if (circleTap) {
 		Redirect(ctx, StateDirector::run);
 		return;
 	}
@@ -219,20 +265,19 @@ void driftdash_inputs(app::player::PlayerHsmContext* ctx) {
 }
 
 void bouncejump_inputs(app::player::PlayerHsmContext* ctx) {
-	auto* input = ctx->playerObject->GetComponent<hh::game::GOCInput>();
-	auto* inputcomp = input->GetInputComponent();
-	auto* HSMComp = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
+	auto* pGOCInput = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent();
+	auto* pGOCPlayerHSM = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
 
-	if (inputcomp->actionMonitors[1].state & 512) {
+	if (pGOCInput->actionMonitors[1].state & 512) {
 		Redirect(ctx, StateDirector::homing);
 	}
-	if (inputcomp->actionMonitors[0].state & 512) {
+	if (pGOCInput->actionMonitors[0].state & 512) {
 		Redirect(ctx, StateDirector::doublejump);
 	}
-	if (inputcomp->actionMonitors[7].state & 512) {
-		HSMComp->ChangeState(52, 0);
+	if (pGOCInput->actionMonitors[7].state & 512) {
+		pGOCPlayerHSM->ChangeState(52, 0);
 	}
-	if (inputcomp->actionMonitors[3].state & 256) {
+	if (pGOCInput->actionMonitors[3].state & 256) {
 		Redirect(ctx, StateDirector::preserveboost);
 	}
 	//if (inputcomp->actionMonitors[7].state & 256 && Timer > 0.15f) {
@@ -240,67 +285,42 @@ void bouncejump_inputs(app::player::PlayerHsmContext* ctx) {
 	//}
 }
 
-//void spinAttackSwitcher(app::player::PlayerHsmContext* ctx, float deltaTime) {
-//	auto* HSMComp = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
-//	int getID = HSMComp->GetCurrentState();
+//void spinAttackCalculator(app::player::PlayerHsmContext* ctx) {
+//	csl::math::Vector4 velocity_m = ctx->gocPlayerKinematicParams->velocity;
+//	float vMagnitude = velocity_m.y();
 //
-//	static float SpnAttk_Timer = 0.0f;
-//
-//	if (SpnAttk_Timer < 0.15f) {
-//		SpnAttk_Timer += deltaTime;
+//	if (vMagnitude >= -9) {
+//		pParams->whiteSpace.spinAttack.jumpForce = 15.0f;
+//		pParams->whiteSpace.spinAttack.jumpAddForce = 15.0f;
+//		pParams->forwardView.spinAttack.jumpForce = 15.0f;
+//		pParams->forwardView.spinAttack.jumpAddForce = 15.0f;
+//		pParams->sideView.spinAttack.jumpForce = 15.0f;
+//		pParams->sideView.spinAttack.jumpAddForce = 15.0f;
+//		pParams->boss.spinAttack.jumpForce = 15.0f;
+//		pParams->boss.spinAttack.jumpAddForce = 15.0f;
 //	}
-//	
-//	if (SpnAttk_Timer > 0.15f) {
-//		HSMComp->ChangeState(11, 0);
-//		tryDamage(ctx, false);
-//		SpnAttk_Timer = 0.0f;
-//		NOTIFY("[Shadow Moveset]: DIRECTED TO BOUNCY \n");
+//	else {
+//		pParams->whiteSpace.spinAttack.jumpForce = vMagnitude/-1;
+//		pParams->whiteSpace.spinAttack.jumpAddForce = vMagnitude/-1;
+//		pParams->forwardView.spinAttack.jumpForce = vMagnitude/-1;
+//		pParams->forwardView.spinAttack.jumpAddForce = vMagnitude/-1;
+//		pParams->sideView.spinAttack.jumpForce = vMagnitude/-1;
+//		pParams->sideView.spinAttack.jumpAddForce = vMagnitude/-1;
+//		pParams->boss.spinAttack.jumpForce = vMagnitude/-1;
+//		pParams->boss.spinAttack.jumpAddForce = vMagnitude/-1;
 //	}
 //}
 
-void spinAttackCalculator(app::player::PlayerHsmContext* ctx) {
-
-
-	auto* playerCommonRFL = hh::fnd::ResourceManager::GetInstance()->GetResource<hh::fnd::ResReflectionT<app::player::PlayerParameters>>("player_common");
-	auto* params = playerCommonRFL->GetData();
-
-	csl::math::Vector4 velocity_m = ctx->gocPlayerKinematicParams->velocity;
-	float vMagnitude = velocity_m.y();
-
-	if (vMagnitude >= -9) {
-		params->whiteSpace.spinAttack.jumpForce = 15.0f;
-		params->whiteSpace.spinAttack.jumpAddForce = 15.0f;
-		params->forwardView.spinAttack.jumpForce = 15.0f;
-		params->forwardView.spinAttack.jumpAddForce = 15.0f;
-		params->sideView.spinAttack.jumpForce = 15.0f;
-		params->sideView.spinAttack.jumpAddForce = 15.0f;
-		params->boss.spinAttack.jumpForce = 15.0f;
-		params->boss.spinAttack.jumpAddForce = 15.0f;
-	}
-	else {
-		params->whiteSpace.spinAttack.jumpForce = vMagnitude/-1;
-		params->whiteSpace.spinAttack.jumpAddForce = vMagnitude/-1;
-		params->forwardView.spinAttack.jumpForce = vMagnitude/-1;
-		params->forwardView.spinAttack.jumpAddForce = vMagnitude/-1;
-		params->sideView.spinAttack.jumpForce = vMagnitude/-1;
-		params->sideView.spinAttack.jumpAddForce = vMagnitude/-1;
-		params->boss.spinAttack.jumpForce = vMagnitude/-1;
-		params->boss.spinAttack.jumpAddForce = vMagnitude/-1;
-	}
-}
-
-void drop_driftdash_transition(app::player::PlayerHsmContext* ctx, float deltaTime)
+void drop_driftdash_transition(app::player::PlayerHsmContext* ctx, float deltaTime) 
 {
-	auto* HSMComp = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
-	int getID = HSMComp->GetCurrentState();
-	auto* gameManager = hh::game::GameManager::GetInstance();
-	auto* lvlInfo = gameManager->GetService<app::level::LevelInfo>();
+	auto* pGOCPlayerHsm = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
+	int getID = pGOCPlayerHsm->GetCurrentState();
 
 	static float DDash_Timer = 0.0f;
 
 	if (DDash_Timer < 0.15f && getID != 111) {
 		DDash_Timer += deltaTime;
-		HSMComp->ChangeState(109, 0);
+		pGOCPlayerHsm->ChangeState(109, 0);
 		NOTIFY("put to drop for")
 		return;
 	}
@@ -317,10 +337,8 @@ void drop_driftdash_transition(app::player::PlayerHsmContext* ctx, float deltaTi
 }
 
 void jumpSpeed_func(std::string arg) {
-	auto* playerCommonRFL = hh::fnd::ResourceManager::GetInstance()->GetResource<hh::fnd::ResReflectionT<app::player::PlayerParameters>>("player_common");
-	if (playerCommonRFL) {
-		auto* params = playerCommonRFL->GetData();
-
+	if (pParams) 
+	{
 		struct jumpSpeedParams {
 			float maxStickBrake;
 			float minStickBrake;
@@ -359,98 +377,98 @@ void jumpSpeed_func(std::string arg) {
 
 		if (arg == "backup") {
 			// whiteSpace
-			WS_B.maxStickBrake = params->whiteSpace.jumpSpeed.maxStickBrake;
-			WS_B.minStickBrake = params->whiteSpace.jumpSpeed.minStickBrake;
-			WS_B.brake = params->whiteSpace.jumpSpeed.brake;
-			WS_B.accel = params->whiteSpace.jumpSpeed.accel;
-			WS_B.limitUpSpeed = params->whiteSpace.jumpSpeed.limitUpSpeed;
-			WS_B.StickSpeed = params->whiteSpace.jumpSpeed.minStickSpeed;
+			WS_B.maxStickBrake = pParams->whiteSpace.jumpSpeed.maxStickBrake;
+			WS_B.minStickBrake = pParams->whiteSpace.jumpSpeed.minStickBrake;
+			WS_B.brake = pParams->whiteSpace.jumpSpeed.brake;
+			WS_B.accel = pParams->whiteSpace.jumpSpeed.accel;
+			WS_B.limitUpSpeed = pParams->whiteSpace.jumpSpeed.limitUpSpeed;
+			WS_B.StickSpeed = pParams->whiteSpace.jumpSpeed.minStickSpeed;
 			// forwardView
-			FV_B.maxStickBrake = params->forwardView.jumpSpeed.maxStickBrake;
-			FV_B.minStickBrake = params->forwardView.jumpSpeed.minStickBrake;
-			FV_B.brake = params->forwardView.jumpSpeed.brake;
-			FV_B.accel = params->forwardView.jumpSpeed.accel;
-			FV_B.limitUpSpeed = params->forwardView.jumpSpeed.limitUpSpeed;
-			FV_B.StickSpeed = params->forwardView.jumpSpeed.minStickSpeed;
+			FV_B.maxStickBrake = pParams->forwardView.jumpSpeed.maxStickBrake;
+			FV_B.minStickBrake = pParams->forwardView.jumpSpeed.minStickBrake;
+			FV_B.brake = pParams->forwardView.jumpSpeed.brake;
+			FV_B.accel = pParams->forwardView.jumpSpeed.accel;
+			FV_B.limitUpSpeed = pParams->forwardView.jumpSpeed.limitUpSpeed;
+			FV_B.StickSpeed = pParams->forwardView.jumpSpeed.minStickSpeed;
 			// sideView
-			SV_B.maxStickBrake = params->sideView.jumpSpeed.maxStickBrake;
-			SV_B.minStickBrake = params->sideView.jumpSpeed.minStickBrake;
-			SV_B.brake = params->sideView.jumpSpeed.brake;
-			SV_B.accel = params->sideView.jumpSpeed.accel;
-			SV_B.limitUpSpeed = params->sideView.jumpSpeed.limitUpSpeed;
-			SV_B.StickSpeed = params->sideView.jumpSpeed.minStickSpeed;
+			SV_B.maxStickBrake = pParams->sideView.jumpSpeed.maxStickBrake;
+			SV_B.minStickBrake = pParams->sideView.jumpSpeed.minStickBrake;
+			SV_B.brake = pParams->sideView.jumpSpeed.brake;
+			SV_B.accel = pParams->sideView.jumpSpeed.accel;
+			SV_B.limitUpSpeed = pParams->sideView.jumpSpeed.limitUpSpeed;
+			SV_B.StickSpeed = pParams->sideView.jumpSpeed.minStickSpeed;
 			// boss
-			BS_B.maxStickBrake = params->boss.jumpSpeed.maxStickBrake;
-			BS_B.minStickBrake = params->boss.jumpSpeed.minStickBrake;
-			BS_B.brake = params->boss.jumpSpeed.brake;
-			BS_B.accel = params->boss.jumpSpeed.accel;
-			BS_B.limitUpSpeed = params->boss.jumpSpeed.limitUpSpeed;
-			BS_B.StickSpeed = params->boss.jumpSpeed.minStickSpeed;
-			NOTIFY("[Shadow Moveset]: Backed up jumpSpeed params")
+			BS_B.maxStickBrake = pParams->boss.jumpSpeed.maxStickBrake;
+			BS_B.minStickBrake = pParams->boss.jumpSpeed.minStickBrake;
+			BS_B.brake = pParams->boss.jumpSpeed.brake;
+			BS_B.accel = pParams->boss.jumpSpeed.accel;
+			BS_B.limitUpSpeed = pParams->boss.jumpSpeed.limitUpSpeed;
+			BS_B.StickSpeed = pParams->boss.jumpSpeed.minStickSpeed;
+			NOTIFY("Backed up jumpSpeed params")
 			return;
 		}
 		if (arg == "apply") {
 			// whiteSpace
-			params->whiteSpace.jumpSpeed.maxStickBrake = WS.maxStickBrake;
-			params->whiteSpace.jumpSpeed.minStickBrake = WS.minStickBrake;
-			params->whiteSpace.jumpSpeed.brake = WS.brake;
-			params->whiteSpace.jumpSpeed.accel = WS.accel;
-			params->whiteSpace.jumpSpeed.limitUpSpeed = WS.limitUpSpeed;
-			params->whiteSpace.jumpSpeed.minStickSpeed = WS.StickSpeed;
+			pParams->whiteSpace.jumpSpeed.maxStickBrake = WS.maxStickBrake;
+			pParams->whiteSpace.jumpSpeed.minStickBrake = WS.minStickBrake;
+			pParams->whiteSpace.jumpSpeed.brake = WS.brake;
+			pParams->whiteSpace.jumpSpeed.accel = WS.accel;
+			pParams->whiteSpace.jumpSpeed.limitUpSpeed = WS.limitUpSpeed;
+			pParams->whiteSpace.jumpSpeed.minStickSpeed = WS.StickSpeed;
 			// forwardView
-			params->forwardView.jumpSpeed.maxStickBrake = FV.maxStickBrake;
-			params->forwardView.jumpSpeed.minStickBrake = FV.minStickBrake;
-			params->forwardView.jumpSpeed.brake = FV.brake;
-			params->forwardView.jumpSpeed.accel = FV.accel;
-			params->forwardView.jumpSpeed.limitUpSpeed = FV.limitUpSpeed;
-			params->forwardView.jumpSpeed.minStickSpeed = FV.StickSpeed;
+			pParams->forwardView.jumpSpeed.maxStickBrake = FV.maxStickBrake;
+			pParams->forwardView.jumpSpeed.minStickBrake = FV.minStickBrake;
+			pParams->forwardView.jumpSpeed.brake = FV.brake;
+			pParams->forwardView.jumpSpeed.accel = FV.accel;
+			pParams->forwardView.jumpSpeed.limitUpSpeed = FV.limitUpSpeed;
+			pParams->forwardView.jumpSpeed.minStickSpeed = FV.StickSpeed;
 			// sideView
-			params->sideView.jumpSpeed.maxStickBrake = SV.maxStickBrake;
-			params->sideView.jumpSpeed.minStickBrake = SV.minStickBrake;
-			params->sideView.jumpSpeed.brake = SV.brake;
-			params->sideView.jumpSpeed.accel = SV.accel;
-			params->sideView.jumpSpeed.limitUpSpeed = SV.limitUpSpeed;
-			params->sideView.jumpSpeed.minStickSpeed = SV.StickSpeed;
+			pParams->sideView.jumpSpeed.maxStickBrake = SV.maxStickBrake;
+			pParams->sideView.jumpSpeed.minStickBrake = SV.minStickBrake;
+			pParams->sideView.jumpSpeed.brake = SV.brake;
+			pParams->sideView.jumpSpeed.accel = SV.accel;
+			pParams->sideView.jumpSpeed.limitUpSpeed = SV.limitUpSpeed;
+			pParams->sideView.jumpSpeed.minStickSpeed = SV.StickSpeed;
 			// boss
-			params->boss.jumpSpeed.maxStickBrake = BS.maxStickBrake;
-			params->boss.jumpSpeed.minStickBrake = BS.minStickBrake;
-			params->boss.jumpSpeed.brake = BS.brake;
-			params->boss.jumpSpeed.accel = BS.accel;
-			params->boss.jumpSpeed.limitUpSpeed = BS.limitUpSpeed;
-			params->boss.jumpSpeed.minStickSpeed = BS.StickSpeed;
-			NOTIFY("[Shadow Moveset]: Applied jumpSpeed params \n")
+			pParams->boss.jumpSpeed.maxStickBrake = BS.maxStickBrake;
+			pParams->boss.jumpSpeed.minStickBrake = BS.minStickBrake;
+			pParams->boss.jumpSpeed.brake = BS.brake;
+			pParams->boss.jumpSpeed.accel = BS.accel;
+			pParams->boss.jumpSpeed.limitUpSpeed = BS.limitUpSpeed;
+			pParams->boss.jumpSpeed.minStickSpeed = BS.StickSpeed;
+			NOTIFY("Applied jumpSpeed params")
 			return;
 		}
 		if (arg == "restore") {
 			// whiteSpace
-			params->whiteSpace.jumpSpeed.maxStickBrake = WS_B.maxStickBrake;
-			params->whiteSpace.jumpSpeed.minStickBrake = WS_B.minStickBrake;
-			params->whiteSpace.jumpSpeed.brake = WS_B.brake;
-			params->whiteSpace.jumpSpeed.accel = WS_B.accel;
-			params->whiteSpace.jumpSpeed.limitUpSpeed = WS_B.limitUpSpeed;
-			params->whiteSpace.jumpSpeed.minStickSpeed = WS_B.StickSpeed;
+			pParams->whiteSpace.jumpSpeed.maxStickBrake = WS_B.maxStickBrake;
+			pParams->whiteSpace.jumpSpeed.minStickBrake = WS_B.minStickBrake;
+			pParams->whiteSpace.jumpSpeed.brake = WS_B.brake;
+			pParams->whiteSpace.jumpSpeed.accel = WS_B.accel;
+			pParams->whiteSpace.jumpSpeed.limitUpSpeed = WS_B.limitUpSpeed;
+			pParams->whiteSpace.jumpSpeed.minStickSpeed = WS_B.StickSpeed;
 			// forwardView
-			params->forwardView.jumpSpeed.maxStickBrake = FV_B.maxStickBrake;
-			params->forwardView.jumpSpeed.minStickBrake = FV_B.minStickBrake;
-			params->forwardView.jumpSpeed.brake = FV_B.brake;
-			params->forwardView.jumpSpeed.accel = FV_B.accel;
-			params->forwardView.jumpSpeed.limitUpSpeed = FV_B.limitUpSpeed;
-			params->forwardView.jumpSpeed.minStickSpeed = FV_B.StickSpeed;
+			pParams->forwardView.jumpSpeed.maxStickBrake = FV_B.maxStickBrake;
+			pParams->forwardView.jumpSpeed.minStickBrake = FV_B.minStickBrake;
+			pParams->forwardView.jumpSpeed.brake = FV_B.brake;
+			pParams->forwardView.jumpSpeed.accel = FV_B.accel;
+			pParams->forwardView.jumpSpeed.limitUpSpeed = FV_B.limitUpSpeed;
+			pParams->forwardView.jumpSpeed.minStickSpeed = FV_B.StickSpeed;
 			// sideView
-			params->sideView.jumpSpeed.maxStickBrake = SV_B.maxStickBrake;
-			params->sideView.jumpSpeed.minStickBrake = SV_B.minStickBrake;
-			params->sideView.jumpSpeed.brake = SV_B.brake;
-			params->sideView.jumpSpeed.accel = SV_B.accel;
-			params->sideView.jumpSpeed.limitUpSpeed = SV_B.limitUpSpeed;
-			params->sideView.jumpSpeed.minStickSpeed = SV_B.StickSpeed;
+			pParams->sideView.jumpSpeed.maxStickBrake = SV_B.maxStickBrake;
+			pParams->sideView.jumpSpeed.minStickBrake = SV_B.minStickBrake;
+			pParams->sideView.jumpSpeed.brake = SV_B.brake;
+			pParams->sideView.jumpSpeed.accel = SV_B.accel;
+			pParams->sideView.jumpSpeed.limitUpSpeed = SV_B.limitUpSpeed;
+			pParams->sideView.jumpSpeed.minStickSpeed = SV_B.StickSpeed;
 			// boss
-			params->boss.jumpSpeed.maxStickBrake = BS_B.maxStickBrake;
-			params->boss.jumpSpeed.minStickBrake = BS_B.minStickBrake;
-			params->boss.jumpSpeed.brake = BS_B.brake;
-			params->boss.jumpSpeed.accel = BS_B.accel;
-			params->boss.jumpSpeed.limitUpSpeed = BS_B.limitUpSpeed;
-			params->boss.jumpSpeed.minStickSpeed = BS_B.StickSpeed;
-			NOTIFY("[Shadow Moveset]: Restored jumpSpeed params \n")
+			pParams->boss.jumpSpeed.maxStickBrake = BS_B.maxStickBrake;
+			pParams->boss.jumpSpeed.minStickBrake = BS_B.minStickBrake;
+			pParams->boss.jumpSpeed.brake = BS_B.brake;
+			pParams->boss.jumpSpeed.accel = BS_B.accel;
+			pParams->boss.jumpSpeed.limitUpSpeed = BS_B.limitUpSpeed;
+			pParams->boss.jumpSpeed.minStickSpeed = BS_B.StickSpeed;
+			NOTIFY("Restored jumpSpeed params")
 			return;
 		}
 		return;
@@ -460,102 +478,98 @@ void jumpSpeed_func(std::string arg) {
 
 // !!! big func, don't open it !!! 
 void player_common_tweak() {
-	auto* playerCommonRFL = hh::fnd::ResourceManager::GetInstance()->GetResource<hh::fnd::ResReflectionT<app::player::PlayerParameters>>("player_common");
-	auto* params = playerCommonRFL->GetData();
 	//whiteSpace
-	params->whiteSpace.spinAttack.limitSpeedMax = 100.0f;
-	params->whiteSpace.spinAttack.brakeForce = 0.0f;
-	params->whiteSpace.driftDash.brake = 3.0f;
-	params->whiteSpace.driftDash.checkDashSpeed = 15.0f;
-	params->whiteSpace.driftDash.checkDashTime = 0.45f;
-	params->whiteSpace.driftDash.endSteeringSpeed = 120.0f;
-	params->whiteSpace.driftDash.maxSpeed = 100.0f;
-	params->whiteSpace.driftDash.outOfControlSpeed = 80.0f;
-	params->whiteSpace.spindash.minSpeed = 20.0f;
+	pParams->whiteSpace.spinAttack.limitSpeedMax = 100.0f;
+	pParams->whiteSpace.spinAttack.brakeForce = 0.0f;
+	pParams->whiteSpace.driftDash.brake = 3.0f;
+	pParams->whiteSpace.driftDash.checkDashSpeed = 15.0f;
+	pParams->whiteSpace.driftDash.checkDashTime = 0.45f;
+	pParams->whiteSpace.driftDash.endSteeringSpeed = 120.0f;
+	pParams->whiteSpace.driftDash.maxSpeed = 100.0f;
+	pParams->whiteSpace.driftDash.outOfControlSpeed = 80.0f;
+	pParams->whiteSpace.spindash.minSpeed = 20.0f;
 	// forwardView
-	params->forwardView.spinAttack.limitSpeedMax = 80.0f;
-	params->forwardView.spinAttack.brakeForce = 0.0f;
-	params->forwardView.driftDash.brake = 3.0f;
-	params->forwardView.driftDash.checkDashSpeed = 15.0f;
-	params->forwardView.driftDash.checkDashTime = 0.45f;
-	params->forwardView.driftDash.endSteeringSpeed = 120.0f;
-	params->forwardView.driftDash.maxSpeed = 100.0f;
-	params->forwardView.driftDash.outOfControlSpeed = 80.0f;
-	params->forwardView.spindash.minSpeed = 20.0f;
+	pParams->forwardView.spinAttack.limitSpeedMax = 80.0f;
+	pParams->forwardView.spinAttack.brakeForce = 0.0f;
+	pParams->forwardView.driftDash.brake = 3.0f;
+	pParams->forwardView.driftDash.checkDashSpeed = 15.0f;
+	pParams->forwardView.driftDash.checkDashTime = 0.45f;
+	pParams->forwardView.driftDash.endSteeringSpeed = 120.0f;
+	pParams->forwardView.driftDash.maxSpeed = 100.0f;
+	pParams->forwardView.driftDash.outOfControlSpeed = 80.0f;
+	pParams->forwardView.spindash.minSpeed = 20.0f;
 	// sideView
-	params->sideView.spinAttack.limitSpeedMax = 80.0f;
-	params->sideView.spinAttack.brakeForce = 0.0f;
-	params->sideView.driftDash.brake = 3.0f;
-	params->sideView.driftDash.checkDashSpeed = 15.0f;
-	params->sideView.driftDash.checkDashTime = 0.45f;
-	params->sideView.driftDash.endSteeringSpeed = 120.0f;
-	params->sideView.driftDash.maxSpeed = 100.0f;
-	params->sideView.driftDash.outOfControlSpeed = 80.0f;
-	params->sideView.spindash.minSpeed = 20.0f;
+	pParams->sideView.spinAttack.limitSpeedMax = 80.0f;
+	pParams->sideView.spinAttack.brakeForce = 0.0f;
+	pParams->sideView.driftDash.brake = 3.0f;
+	pParams->sideView.driftDash.checkDashSpeed = 15.0f;
+	pParams->sideView.driftDash.checkDashTime = 0.45f;
+	pParams->sideView.driftDash.endSteeringSpeed = 120.0f;
+	pParams->sideView.driftDash.maxSpeed = 100.0f;
+	pParams->sideView.driftDash.outOfControlSpeed = 80.0f;
+	pParams->sideView.spindash.minSpeed = 20.0f;
 	// boss
-	params->boss.spinAttack.limitSpeedMax = 80.0f;
-	params->boss.spinAttack.brakeForce = 0.0f;
-	params->boss.driftDash.brake = 3.0f;
-	params->boss.driftDash.checkDashSpeed = 15.0f;
-	params->boss.driftDash.checkDashTime = 0.45f;
-	params->boss.driftDash.endSteeringSpeed = 120.0f;
-	params->boss.driftDash.maxSpeed = 100.0f;
-	params->boss.driftDash.outOfControlSpeed = 80.0f;
-	params->boss.spindash.minSpeed = 20.0f;
-	NOTIFY("APPLIED HARDCODE \n")
+	pParams->boss.spinAttack.limitSpeedMax = 80.0f;
+	pParams->boss.spinAttack.brakeForce = 0.0f;
+	pParams->boss.driftDash.brake = 3.0f;
+	pParams->boss.driftDash.checkDashSpeed = 15.0f;
+	pParams->boss.driftDash.checkDashTime = 0.45f;
+	pParams->boss.driftDash.endSteeringSpeed = 120.0f;
+	pParams->boss.driftDash.maxSpeed = 100.0f;
+	pParams->boss.driftDash.outOfControlSpeed = 80.0f;
+	pParams->boss.spindash.minSpeed = 20.0f;
+	NOTIFY("APPLIED HARDCODE")
 	// ... okay maybe not that big rn, but soon it'd be BIG 
 	// or not..
 	// should not be used for bundled dll in modpack
 }
 
 void pizdecSuperBiker3D(app::player::PlayerHsmContext* ctx, float deltaTime) {
-
-	const float stompStopForce = 15.0f;
-
 	csl::math::Vector4 Velocity = ctx->gocPlayerKinematicParams->velocity;
 	float Y = Velocity.y();
+	
+	const float bounceBreakForce = 20.0f;
+
 	float prevX = prevVelocity.x();
 	float prevZ = prevVelocity.z();
-	std::cout << "PrevX infunc is " << prevX << "\n" << std::endl;
-	std::cout << "PrevZ infunc is " << prevZ << "\n" << std::endl;
-	Eigen::Vector4f idkVector(prevX, 0, prevZ, 0);
-	Eigen::Vector4f idkVector1(prevX, 0, prevZ, 0);
+	csl::math::Vector4 horVector(prevX, 0, prevZ, 0);
+	
+	#if _DEBUG
+	std::cout << "PrevX infunc is " << prevX << std::endl;
+	std::cout << "PrevZ infunc is " << prevZ << std::endl;
+	#endif
 
-	if (idkVector.norm() < stompStopForce * deltaTime) {
-		Velocity = Eigen::Vector4f(0, 0, 0, 0);
+	if (horVector.norm() < bounceBreakForce * deltaTime) {
+		Velocity = csl::math::Vector4(0, 0, 0, 0);
 	}
 	else {
-		Eigen::Vector4f idkVectornormalize = idkVector / idkVector.norm();
-		ctx->gocPlayerKinematicParams->velocity = (idkVectornormalize * (idkVector.norm() - (stompStopForce * deltaTime)));
+
+		Eigen::Vector4f horVectornormalize = horVector / horVector.norm();
+		Velocity = (horVectornormalize * (horVector.norm() - (bounceBreakForce * deltaTime)));
 		Velocity.y() = Y;
 	}
 	prevVelocity = Velocity;
 
-	std::cout << "Velocity X " << Velocity.x() << "\n" << std::endl;
-	std::cout << "Velocity Y " << Velocity.y() << "\n" << std::endl;
-	std::cout << "Velocity Z " << Velocity.z() << "\n" << std::endl;
+	#if _DEBUG
+	std::cout << "Velocity X " << Velocity.x() << std::endl;
+	std::cout << "Velocity Y " << Velocity.y() << std::endl;
+	std::cout << "Velocity Z " << Velocity.z() << std::endl;
+	#endif
 }
 
 void Bouncinggg(std::string arg) {
-	auto* gameManager = hh::game::GameManager::GetInstance();
-	auto* lvlInfo = gameManager->GetService<app::level::LevelInfo>();
-	auto Speed = lvlInfo->playerInformation->Speed;
-
-	auto* playerCommonRFL = hh::fnd::ResourceManager::GetInstance()->GetResource<hh::fnd::ResReflectionT<app::player::PlayerParameters>>("player_common");
-	auto* params = playerCommonRFL->GetData();
+	float Speed = pLvlInfo->playerInformation->Speed.value();
 	static float SampleSpeed = 0;
 
 	if (arg == "sample") {
-		if (Speed.has_value()) {
-			SampleSpeed = Speed.value();
-		}
+		SampleSpeed = Speed;
 		return;
 	}
 	if (arg == "apply") {
-		params->whiteSpace.jumpSpeed.minStickSpeed = SampleSpeed;
-		params->forwardView.jumpSpeed.minStickSpeed = SampleSpeed;
-		params->sideView.jumpSpeed.minStickSpeed = SampleSpeed;
-		params->boss.jumpSpeed.minStickSpeed = SampleSpeed;
+		pParams->whiteSpace.jumpSpeed.minStickSpeed = SampleSpeed;
+		pParams->forwardView.jumpSpeed.minStickSpeed = SampleSpeed;
+		pParams->sideView.jumpSpeed.minStickSpeed = SampleSpeed;
+		pParams->boss.jumpSpeed.minStickSpeed = SampleSpeed;
 		return;
 	}
 }
@@ -570,14 +584,14 @@ HOOK(uint64_t, __fastcall, GameModeTitleInit, 0x1401990E0, app::game::GameMode* 
 HOOK(void, __fastcall, InitPlayer, 0x14060DBC0, hh::game::GameObject* self) {
 	originalInitPlayer(self);
 	
-	auto* BBcomp = self->GetComponent<app::player::GOCPlayerBlackboard>();
-	auto* BBstatus = BBcomp->blackboard->GetContent<app::player::BlackboardStatus>();
+	auto* pBBstatus = self->GetComponent<app::player::GOCPlayerBlackboard>()->blackboard->GetContent<app::player::BlackboardStatus>();
 	
 	//player_common_tweak();
 	jumpSpeed_func("backup");
 	bounceRFL("backup");
-	if (BBstatus) {
-		BBstatus->SetCombatFlag(app::player::BlackboardStatus::CombatFlag::SLALOM_STEP, 1);
+	setPhysicsVariables();
+	if (pBBstatus) {
+		pBBstatus->SetCombatFlag(app::player::BlackboardStatus::CombatFlag::SLALOM_STEP, 1);
 		NOTIFY("Enabled Slalom Step")
 		return;
 	}
@@ -585,7 +599,6 @@ HOOK(void, __fastcall, InitPlayer, 0x14060DBC0, hh::game::GameObject* self) {
 		NOTIFY("Failed to enable Slalom step")
 		return;
 	}
-	return;
 }
 
 
@@ -618,38 +631,65 @@ HOOK(bool, __fastcall, SpinDashStep, 0x1406CB790, app::player::StateSpinDash* se
 } // don't ask me why i do this
 
 HOOK(bool, __fastcall, SlalomStep, 0x1406C9390, app::player::StateSlalomStep * self, app::player::PlayerHsmContext * ctx, float deltaTime) {
-	auto* input = ctx->playerObject->GetComponent<hh::game::GOCInput>();
-	auto* inputcomp = input->GetInputComponent();
-	if (inputcomp->actionMonitors[3].state & 256) {
+	auto* pGOCInput = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent();
+	if (pGOCInput->actionMonitors[3].state & 256) {
 		Redirect(ctx, StateDirector::preserveboost);
 	}
 	return originalSlalomStep(self, ctx, deltaTime);
 }
 
 HOOK(bool, __fastcall, BounceJumpStep, 0x1406C1C80, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
-	
-	
+	if (!WantToBounce) {
+		jumpSpeed_func("apply");
+	}
 	bouncejump_inputs(ctx);
 	tryDamage(ctx, 0);
 	return originalBounceJumpStep(self, ctx, deltaTime);
 }
 
 HOOK(void, __fastcall, EnterStompingDown, 0x14a85c590, app::player::StateStompingDown* self, app::player::PlayerHsmContext* ctx, int previousState) {
-	csl::math::Vector4 currVelocity = ctx->gocPlayerKinematicParams->velocity;
+	auto* pLvlInfo = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>();
+	auto* pGOCPlayerHSM = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
+	auto* pGOCPlayerKinematic = ctx->playerObject->GetComponent<app::player::GOCPlayerKinematicParams>();
+	float atitude = pLvlInfo->playerInformation->altitude.value();
+
+	csl::math::Vector4 currVelocity = pGOCPlayerKinematic->velocity;
+	
 	prevVelocity = currVelocity;
+	
 	float prevX = prevVelocity.x();
 	float prevZ = prevVelocity.z();
-	NOTIFY("sample velocity on entrance");
-	std::cout << "PrevX Enter is " << prevX << "\n" << std::endl;
-	std::cout << "PrevZ Enter is " << prevZ << "\n" << std::endl;
+	
+	#if _DEBUG
+	NOTIFY("sample velocity on EnterStateStompingDown");
+	std::cout << "PrevX Enter is " << prevX << std::endl;
+	std::cout << "PrevZ Enter is " << prevZ << std::endl;
+	#endif
 	Bouncinggg("sample");
-	originalEnterStompingDown(self, ctx, previousState);
+	if (atitude < fallToRollAtitude) {
+		pGOCPlayerHSM->hsm.ChangeState(111, 0);
+	}
+	else {
+		originalEnterStompingDown(self, ctx, previousState);
+	}
 }
 
 HOOK(bool, __fastcall, StompingDownStep, 0x1406d1760, app::player::StateStompingDown* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
-	NOTIFY("trying super cool thing");
+	auto* pGOCInput = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent();
+	csl::math::Vector2 currentInput = pLvlInfo->playerInformation->leftStickInput.value();
+
 	originalStompingDownStep(self, ctx, deltaTime);
-	pizdecSuperBiker3D(ctx, deltaTime);
+	if (currentInput.norm() > deadZone.norm()) {
+		pizdecSuperBiker3D(ctx, deltaTime);
+		WantToBounce = true;
+		NOTIFY("BOUNCING")
+	}
+	if (currentInput.norm() < deadZone.norm()) {
+		WantToBounce = false;
+	}
+	if (!WantToBounce) {
+		jumpSpeed_func("apply");
+	}
 	return (self, ctx, deltaTime);
 }
 
@@ -659,15 +699,16 @@ HOOK(bool, __fastcall, GrindDoubleJumpStep, 0x1406BEAB0, app::player::StateGrind
 }
 
 HOOK(void, __fastcall, StateDriftDashLeave, 0x1406AF8D0, app::player::StateDriftDash* self, app::player::PlayerHsmContext* ctx, int nextState) {
-	//auto* GOCSound = ctx->playerObject->GetComponent<hh::snd::GOCSound>();
 	tryDamage(ctx, true);
-	//GOCSound->StopAll(1);
 	originalStateDriftDashLeave(self, ctx, nextState);
 }
 
 HOOK(void, __fastcall, StateBounceJumpEnter, 0x1406C06E0, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, int previousState) {
-	std::cout << "Bounce previous State " << previousState << "\n" << std::endl;
-	if (previousState == 55) {
+	csl::math::Vector2 currentInput = pLvlInfo->playerInformation->leftStickInput.value();
+	
+	std::cout << "Bounce previous State " << previousState << std::endl;
+
+	if (previousState == 55 && currentInput.norm() > deadZone.norm()) {
 		Bouncinggg("apply"); // if bouncing, then we hack to retain velocity
 		NOTIFY("hacking bounce speed");
 	}
@@ -685,32 +726,31 @@ HOOK(void, __fastcall, StateBounceJumpLeave, 0x1406C15F0, app::player::StateBoun
 }
 
 HOOK(void, __fastcall, SlidingEnter, 0x1406CBB70, app::player::StateSliding* self, app::player::PlayerHsmContext* ctx, int previousState) {
-	auto* HSMComp = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
+	auto* pGOCPlayerHsm = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
 
 	if (previousState == 20) {
-		HSMComp->hsm.ChangeState(111, 0);
+		pGOCPlayerHsm->hsm.ChangeState(111, 0);
 		NOTIFY("Rolling from squat")
 	}
 
 	if (previousState != 20) {
-		HSMComp->hsm.ChangeState(107, 0);
+		pGOCPlayerHsm->hsm.ChangeState(107, 0);
 		tryDamage(ctx, false);
 		NOTIFY("Rolling...")
 	}
 }
 
 HOOK(bool, __fastcall, StompingLandStep, 0x1406d1d30, app::player::StateStompingLand* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
-	auto* input = ctx->playerObject->GetComponent<hh::game::GOCInput>();
-	auto* inputcomp = input->GetInputComponent();
-	auto* HSMComp = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
-	if (inputcomp->actionMonitors[7].state & 256) {
-		HSMComp->ChangeState(11,0);
+	auto* pGOCInput = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent();
+	auto* pGOCPlayerHsm = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
+	
+	if (pGOCInput->actionMonitors[7].state & 256 && WantToBounce) {
+		pGOCPlayerHsm->ChangeState(11,0);
 	}
-	else
-	{
+	else {
 		originalStompingLandStep(self, ctx, deltaTime);
 	}
-	return self, ctx, deltaTime;
+	return (self, ctx, deltaTime);
 }
 
 BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID reserved)

@@ -14,3 +14,7 @@ IncludeDir0="."
 DependsCount=0
 DLLFile="${PROJECT_NAME}.dll"
 CodeFile=""
+[Variables]
+deadZone=0.09
+rollingAirMultiplier=0.5
+fallToRollAtitude=1.25
