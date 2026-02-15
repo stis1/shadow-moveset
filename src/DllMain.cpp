@@ -15,6 +15,7 @@ static float rollingAirMultiplier = 0;
 static float fallToRollAtitude = 0;
 //static float bounceBreakForce = 0;
 //
+
 void setPhysicsVariables() {
 	std::ifstream ifs{ "mod.ini" };
 	std::string line{};
