@@ -13,7 +13,7 @@ static bool WantToBounce = false;
 csl::math::Vector2 deadZone(0, 0);
 static float rollingAirMultiplier = 0;
 static float fallToRollAtitude = 0;
-static float bounceBreakForce = 0;
+//static float bounceBreakForce = 0;
 //
 void setPhysicsVariables() {
 	std::ifstream ifs{ "mod.ini" };
