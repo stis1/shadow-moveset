@@ -604,52 +604,43 @@ HOOK(void, __fastcall, InitPlayer, 0x14060DBC0, hh::game::GameObject* self) {
 }
 
 
-HOOK(bool, __fastcall, SpinAttackStep, 0x1406CB3E0, app::player::StateSpinAttack* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+HOOK(bool, __fastcall, Step_SpinAttack, 0x1406CB3E0, app::player::StateSpinAttack* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	auto* HSMComp = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
 	bounceRFL("restore");
 	HSMComp->ChangeState(11, 0);
-	return originalSpinAttackStep(self, ctx, deltaTime);
+	return originalStep_SpinAttack(self, ctx, deltaTime);
 }
 
-HOOK(bool, __fastcall, StompingBounceStep, 0x1406D1620, app::player::StateStompingBounce* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+HOOK(bool, __fastcall, Step_StompingBounce, 0x1406D1620, app::player::StateStompingBounce* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	Redirect(ctx, StateDirector::bouncejump);
-	return originalStompingBounceStep(self, ctx, deltaTime);
+	return originalStep_StompingBounce(self, ctx, deltaTime);
 }
 
-HOOK(bool, __fastcall, DriftDashStep, 0x1406AFB70, app::player::StateDriftDash* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+HOOK(bool, __fastcall, Step_DriftDash, 0x1406AFB70, app::player::StateDriftDash* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	tryDamage(ctx, false);
 	driftdash_inputs(ctx);
-	return originalDriftDashStep(self, ctx, deltaTime);
+	return originalStep_DriftDash(self, ctx, deltaTime);
 }
 
-HOOK(bool, __fastcall, DropDashStep, 0x1406AFFB0, app::player::StateDropDash* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+HOOK(bool, __fastcall, Step_DropDash, 0x1406AFFB0, app::player::StateDropDash* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	drop_driftdash_transition(ctx, deltaTime);
-	return originalDropDashStep(self, ctx, deltaTime);
+	return originalStep_DropDash(self, ctx, deltaTime);
 }
 
-HOOK(bool, __fastcall, SpinDashStep, 0x1406CB790, app::player::StateSpinDash* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+HOOK(bool, __fastcall, Step_SpinDash, 0x1406CB790, app::player::StateSpinDash* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	drop_driftdash_transition(ctx, deltaTime);
-	return originalSpinDashStep(self, ctx, deltaTime);
+	return originalStep_SpinDash(self, ctx, deltaTime);
 } // don't ask me why i do this
 
-HOOK(bool, __fastcall, SlalomStep, 0x1406C9390, app::player::StateSlalomStep * self, app::player::PlayerHsmContext * ctx, float deltaTime) {
+HOOK(bool, __fastcall, Step_SlalomStep, 0x1406C9390, app::player::StateSlalomStep * self, app::player::PlayerHsmContext * ctx, float deltaTime) {
 	auto* pGOCInput = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent();
 	if (pGOCInput->actionMonitors[3].state & 256) {
 		Redirect(ctx, StateDirector::preserveboost);
 	}
-	return originalSlalomStep(self, ctx, deltaTime);
+	return originalStep_SlalomStep(self, ctx, deltaTime);
 }
 
-HOOK(bool, __fastcall, BounceJumpStep, 0x1406C1C80, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
-	if (!WantToBounce) {
-		jumpSpeed_func("apply");
-	}
-	bouncejump_inputs(ctx);
-	tryDamage(ctx, 0);
-	return originalBounceJumpStep(self, ctx, deltaTime);
-}
-
-HOOK(void, __fastcall, EnterStompingDown, 0x14a85c590, app::player::StateStompingDown* self, app::player::PlayerHsmContext* ctx, int previousState) {
+HOOK(void, __fastcall, Enter_StompingDown, 0x14a85c590, app::player::StateStompingDown* self, app::player::PlayerHsmContext* ctx, int previousState) {
 	auto* pLvlInfo = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>();
 	auto* pGOCPlayerKinematic = ctx->playerObject->GetComponent<app::player::GOCPlayerKinematicParams>();
 	float atitude = pLvlInfo->playerInformation->altitude.value();
@@ -667,26 +658,28 @@ HOOK(void, __fastcall, EnterStompingDown, 0x14a85c590, app::player::StateStompin
 	std::cout << "PrevZ Enter is " << prevZ << std::endl;
 	#endif
 	Bouncinggg("sample");
-	originalEnterStompingDown(self, ctx, previousState);
+	originalEnter_StompingDown(self, ctx, previousState);
 }
 
-HOOK(bool, __fastcall, StompingDownStep, 0x1406d1760, app::player::StateStompingDown* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+HOOK(bool, __fastcall, Step_StompingDown, 0x1406d1760, app::player::StateStompingDown* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	auto* pGOCInput = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent();
 	auto* pGOCPlayerHsm = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
 	auto* pLvlInfo = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>();
 	csl::math::Vector2 currentInput = pLvlInfo->playerInformation->leftStickInput.value();
-	float altitudeNow = pLvlInfo->playerInformation->altitude.value();
-	static float altitudeOneFrameAgo = 0;
 
-	if (altitudeOneFrameAgo > 0) {
-		if (altitudeNow < fallToRollAtitude && altitudeNow != altitudeOneFrameAgo) {
-			pGOCPlayerHsm->hsm.ChangeState(111, 0);
-		}
-	}
-	if (altitudeOneFrameAgo != altitudeNow) {
-		altitudeOneFrameAgo = altitudeNow;
-	}
-	originalStompingDownStep(self, ctx, deltaTime);
+	//float altitudeNow = pLvlInfo->playerInformation->altitude.value();
+	//static float altitudeOneFrameAgo = 0;
+
+	//if (altitudeOneFrameAgo > 0) {
+	//	if (altitudeNow < fallToRollAtitude && altitudeNow != altitudeOneFrameAgo) {
+	//		pGOCPlayerHsm->hsm.ChangeState(111, 0);
+	//	}
+	//}
+	//if (altitudeOneFrameAgo != altitudeNow) {
+	//	altitudeOneFrameAgo = altitudeNow;
+	//}
+
+	originalStep_StompingDown(self, ctx, deltaTime);
 	if (currentInput.norm() > deadZone.norm()) {
 		pizdecSuperBiker3D(ctx, deltaTime);
 		WantToBounce = true;
@@ -701,17 +694,17 @@ HOOK(bool, __fastcall, StompingDownStep, 0x1406d1760, app::player::StateStomping
 	return (self, ctx, deltaTime);
 }
 
-HOOK(bool, __fastcall, GrindDoubleJumpStep, 0x1406BEAB0, app::player::StateGrindDoubleJump* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+HOOK(bool, __fastcall, Step_GrindDoubleJump, 0x1406BEAB0, app::player::StateGrindDoubleJump* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	tryDamage(ctx, 0);
-	return originalGrindDoubleJumpStep(self, ctx, deltaTime);
+	return originalStep_GrindDoubleJump(self, ctx, deltaTime);
 }
 
-HOOK(void, __fastcall, StateDriftDashLeave, 0x1406AF8D0, app::player::StateDriftDash* self, app::player::PlayerHsmContext* ctx, int nextState) {
+HOOK(void, __fastcall, Leave_DriftDash, 0x1406AF8D0, app::player::StateDriftDash* self, app::player::PlayerHsmContext* ctx, int nextState) {
 	tryDamage(ctx, true);
-	originalStateDriftDashLeave(self, ctx, nextState);
+	originalLeave_DriftDash(self, ctx, nextState);
 }
 
-HOOK(void, __fastcall, StateBounceJumpEnter, 0x1406C06E0, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, int previousState) {
+HOOK(void, __fastcall, Enter_BounceJump, 0x1406C06E0, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, int previousState) {
 	auto* pLvlInfo = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>();
 	csl::math::Vector2 currentInput = pLvlInfo->playerInformation->leftStickInput.value();
 	
@@ -725,16 +718,25 @@ HOOK(void, __fastcall, StateBounceJumpEnter, 0x1406C06E0, app::player::StateBoun
 		jumpSpeed_func("apply");
 		NOTIFY("or.. not");
 	}
-	originalStateBounceJumpEnter(self, ctx, previousState);
+	originalEnter_BounceJump(self, ctx, previousState);
 }
 
-HOOK(void, __fastcall, StateBounceJumpLeave, 0x1406C15F0, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, int nextState) {
+HOOK(bool, __fastcall, Step_BounceJump, 0x1406C1C80, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+	if (!WantToBounce) {
+		jumpSpeed_func("apply");
+	}
+	bouncejump_inputs(ctx);
+	tryDamage(ctx, 0);
+	return originalStep_BounceJump(self, ctx, deltaTime);
+}
+
+HOOK(void, __fastcall, Leave_BounceJump, 0x1406C15F0, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, int nextState) {
 	jumpSpeed_func("restore");
 	bounceRFL("restore");
-	originalStateBounceJumpLeave(self, ctx, nextState);
+	originalLeave_BounceJump(self, ctx, nextState);
 }
 
-HOOK(void, __fastcall, SlidingEnter, 0x1406CBB70, app::player::StateSliding* self, app::player::PlayerHsmContext* ctx, int previousState) {
+HOOK(void, __fastcall, Enter_Sliding, 0x1406CBB70, app::player::StateSliding* self, app::player::PlayerHsmContext* ctx, int previousState) {
 	auto* pGOCPlayerHsm = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
 
 	if (previousState == 20) {
@@ -749,7 +751,7 @@ HOOK(void, __fastcall, SlidingEnter, 0x1406CBB70, app::player::StateSliding* sel
 	}
 }
 
-HOOK(bool, __fastcall, StompingLandStep, 0x1406d1d30, app::player::StateStompingLand* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+HOOK(bool, __fastcall, Step_StompingLand, 0x1406d1d30, app::player::StateStompingLand* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	auto* pGOCInput = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent();
 	auto* pGOCPlayerHsm = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
 	
@@ -757,27 +759,34 @@ HOOK(bool, __fastcall, StompingLandStep, 0x1406d1d30, app::player::StateStomping
 		pGOCPlayerHsm->ChangeState(11,0);
 	}
 	else {
-		originalStompingLandStep(self, ctx, deltaTime);
+		originalStep_StompingLand(self, ctx, deltaTime);
 	}
 	return (self, ctx, deltaTime);
 }
 //
-HOOK(void, __fastcall, StateFallEnter, 0x1406B73E0, app::player::StateFall* self, app::player::PlayerHsmContext* ctx, int previousState) {
-	auto* pGOCPlayerHsm = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
-	auto* pGOCInput = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent();
-	auto* LvlInfo = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>();
-	auto Speed = LvlInfo->playerInformation->Speed.value();
-	bool isR2 = pGOCInput->actionMonitors[3].state & 256;
-	
-	originalStateFallEnter(self, ctx, previousState);
-	if (previousState == 4 && isR2 && Speed > 30) {
-		pGOCPlayerHsm->hsm.ChangeState(17, 0);
-		NOTIFY("bomboclaaat has happened but maybe nah")
-	}
-}
-
+//HOOK(void, __fastcall, StateFallEnter, 0x1406B73E0, app::player::StateFall* self, app::player::PlayerHsmContext* ctx, int previousState) {
+//	auto* pGOCPlayerHsm = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
+//	auto* pGOCInput = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent();
+//	auto* LvlInfo = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>();
+//	auto Speed = LvlInfo->playerInformation->Speed.value();
+//	bool isR2 = pGOCInput->actionMonitors[3].state & 256;
+//	
+//	originalStateFallEnter(self, ctx, previousState);
+//	if (previousState == 4 && isR2 && Speed > 30) {
+//		pGOCPlayerHsm->hsm.ChangeState(17, 0);
+//		NOTIFY("bomboclaaat has happened but maybe nah")
+//	}
+//}
+//
 //HOOK(bool, __fastcall, StateBumpJumpStep, 0x14069E530, app::player::StateBumpJump* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
-//	static float BumpJumpTimer = 0.0f;
+//	auto* pBBStatus = ctx->playerObject->GetComponent<app::player::GOCPlayerBlackboard>()->blackboard->GetContent<app::player::BlackboardStatus>();
+//	pBBStatus->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 0);
+//	bool unk22WorldFlag = pBBStatus->GetWorldFlag(app::player::BlackboardStatus::WorldFlag::UNK22);
+//
+//	pBBStatus->SetWorldFlag(app::player::BlackboardStatus::WorldFlag::UNK22, 1);
+//	originalStateBumpJumpStep(self, ctx, deltaTime);
+//	std::cout << " WORLDFLAG UNK22 = " << unk22WorldFlag << std::endl;
+//	return(self, ctx, deltaTime);
 //}
 
 BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID reserved)
@@ -787,21 +796,22 @@ BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID res
 	case DLL_PROCESS_ATTACH:
 		INSTALL_HOOK(GameModeTitleInit);
 		INSTALL_HOOK(InitPlayer);
-		INSTALL_HOOK(SpinAttackStep);
-		INSTALL_HOOK(DriftDashStep);
-		INSTALL_HOOK(DropDashStep);
-		INSTALL_HOOK(SpinDashStep);
-		INSTALL_HOOK(SlalomStep);
-		INSTALL_HOOK(BounceJumpStep);	
-		INSTALL_HOOK(EnterStompingDown);
-		INSTALL_HOOK(StompingDownStep);
-		INSTALL_HOOK(GrindDoubleJumpStep);
-		INSTALL_HOOK(StateDriftDashLeave);
-		INSTALL_HOOK(StateBounceJumpEnter);
-		INSTALL_HOOK(StateBounceJumpLeave);
-		INSTALL_HOOK(SlidingEnter);
-		INSTALL_HOOK(StompingLandStep);
-		INSTALL_HOOK(StateFallEnter);
+		INSTALL_HOOK(Step_SpinAttack);
+		INSTALL_HOOK(Step_DriftDash);
+		INSTALL_HOOK(Step_DropDash);
+		INSTALL_HOOK(Step_SpinDash);
+		INSTALL_HOOK(Step_SlalomStep);
+		INSTALL_HOOK(Enter_StompingDown);
+		INSTALL_HOOK(Step_StompingDown);
+		INSTALL_HOOK(Step_GrindDoubleJump);
+		INSTALL_HOOK(Leave_DriftDash);
+		INSTALL_HOOK(Enter_BounceJump);
+		INSTALL_HOOK(Step_BounceJump);
+		INSTALL_HOOK(Leave_BounceJump);
+		INSTALL_HOOK(Enter_Sliding);
+		INSTALL_HOOK(Step_StompingLand);
+		//INSTALL_HOOK(StateFallEnter);
+		//INSTALL_HOOK(StateBumpJumpStep);
 		break;
 	case DLL_PROCESS_DETACH:
 	case DLL_THREAD_ATTACH:
