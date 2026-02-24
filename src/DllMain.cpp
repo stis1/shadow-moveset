@@ -610,7 +610,7 @@ HOOK(void, __fastcall, InitPlayer, 0x14060DBC0, hh::game::GameObject* self) {
 	originalInitPlayer(self);
 	
 	auto* pBBstatus = self->GetComponent<app::player::GOCPlayerBlackboard>()->blackboard->GetContent<app::player::BlackboardStatus>();
-	//player_common_tweak();
+	player_common_tweak();
 	jumpSpeed_func("backup");
 	bounceRFL("backup");
 	if (pBBstatus) {
