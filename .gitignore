@@ -3,3 +3,4 @@
 /out
 /CMakeUserPresets.json
 src/1DllMain.cpp
+src/DllMain — копия.cpp
