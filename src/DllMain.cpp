@@ -6,12 +6,12 @@
 #include <optional>
 #include <fstream>
 
-static csl::math::Vector4 prevVelocity;
-static bool WantToBounce;
+static csl::math::Vector4 prevVelocity{};
+static bool WantToBounce{};
 
-static bool rolling;
-static csl::math::Vector2 bounceEnterInput;
-static int bounceEnterId;
+static bool rolling{};
+static csl::math::Vector2 bounceEnterInput{};
+static int bounceEnterId{};
 //
 
 float deadZone (0.045f); // deadzone of 15% on both X and Y axis 
@@ -48,12 +48,11 @@ void checkHomingReticle() {
 void damageControl(app::player::PlayerHsmContext* ctx, bool leaveMeAlone) {
 	auto* pPluginCollision = ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>();
 	auto* pBBbattle = ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardBattle>();
-	auto* pGOCPlayerHsm = ctx->playerObject->GetComponent<app::player::GOCPlayerHsm>();
-
+	
 	static bool isInBallState = false;
 
 	bool isBoosting = ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardStatus>()->GetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST);
-	int getID = pGOCPlayerHsm->GetCurrentState();
+	int getID = ctx->gocPlayerHsm->GetCurrentState();
 
 	if (leaveMeAlone == true) {
 		pPluginCollision->SetTypeAndRadius(2, 0);
@@ -129,48 +128,70 @@ void Redirect(app::player::PlayerHsmContext* ctx, StateDirector to_what)
 		case StateDirector::driftdash:
 			pGOCPlayerHsm->ChangeState(107, 0);
 			damageControl(ctx, false);
+#if _DEBUG
 			NOTIFY("DIRECTED TO DRIFTDASH");
+#endif
 			break;
 		case StateDirector::bouncejump:
 			pGOCPlayerHsm->ChangeState(11, 0);
 			rolling_air_hack(ctx);
 			damageControl(ctx, false);
+#if _DEBUG
 			NOTIFY("DIRECTED TO BOUNCEJUMP");
+#endif	
 			break;
 		case StateDirector::jump:
 			pGOCPlayerHsm->ChangeState(9,0);
+			damageControl(ctx, 0);
+#if _DEBUG
 			NOTIFY("DIRECTED TO JUMP");
+#endif	
 			break;
 		case StateDirector::run:
 			pGOCPlayerHsm->ChangeState(4, 0);
+			damageControl(ctx, 1);
+#if _DEBUG
 			NOTIFY("DIRECTED TO RUN");
+#endif	
 			break;
 		case StateDirector::boost:
 			pGOCPlayerHsm->ChangeState(4, 0);
 			ctx->blackboardStatus->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 1);
 			damageControl(ctx, 0);
+#if _DEBUG
 			NOTIFY("DIRECTED TO BOOST");
+#endif
 			break;
 		case StateDirector::homing:
 			pGOCPlayerHsm->ChangeState(63, 0);
+#if _DEBUG
 			NOTIFY("HOMING SHADOW");
+#endif
 			break;
 		case StateDirector::preserveboost: // for boosting inside slalom, maybe others, bad implementation if being honest
 			ctx->blackboardStatus->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 1);
 			damageControl(ctx, false);
+#if _DEBUG
 			NOTIFY("KEPT BOOST");
+#endif
 			break;
 		case StateDirector::doublejump:
 			pGOCPlayerHsm->ChangeState(10, 0);
+#if _DEBUG
 			NOTIFY("DIRECTED TO DOUBLE JUMP");
+#endif
 			break;
-		case StateDirector::stomp:
+		case StateDirector::stomp:	
 			pGOCPlayerHsm->ChangeState(52, 0);
+#if _DEBUG
 			NOTIFY("DIRECTED TO STOMP");
+#endif
 			break;
 		case StateDirector::falls:
 			pGOCPlayerHsm->ChangeState(15, 0);
+#if _DEBUG
 			NOTIFY("Shadow shall fall");
+#endif
 			break;
 		default:
 			break;
@@ -233,9 +254,9 @@ void bouncejump_inputs(app::player::PlayerHsmContext* ctx) {
 	if (pGOCInput->actionMonitors[7].state & 512 && rolling) {
 		ctx->gocPlayerHsm->ChangeState(4, 0);
 	}
-	if (pGOCInput->actionMonitors[1].state & 512) {
-		ctx->gocPlayerHsm->ChangeState(63, 0);
-	}
+	//if (pGOCInput->actionMonitors[1].state & 512) {
+	//	ctx->gocPlayerHsm->ChangeState(63, 0);
+	//}
 	if (pGOCInput->actionMonitors[0].state & 512) {
 		ctx->gocPlayerHsm->ChangeState(10, 0);
 	}
@@ -259,7 +280,9 @@ void drop_driftdash_transition(app::player::PlayerHsmContext* ctx, float deltaTi
 	if (DDash_Timer < 0.15f && getID != 111) {
 		DDash_Timer += deltaTime;
 		ctx->gocPlayerHsm->ChangeState(109, 0);
+		#if _DEBUG
 		NOTIFY("put to drop for")
+		#endif
 		return;
 	}
 
@@ -294,16 +317,16 @@ void jumpSpeed_func(std::string arg) {
 		static jumpSpeedParams BS_B;
 
 		static jumpSpeedParams WS{
-			0, 0, 0, 1500, 1000, 15
+			0, 0, -4, 1500, 1000, 15
 		};
 		static jumpSpeedParams FV{
-			0, 0, 0, 15, 1000, 15
+			0, 0, -4, 15, 1000, 15
 		};
 		static jumpSpeedParams SV{
-			0, 0, 0, 15, 1000, 10
+			0, 0, -4, 15, 1000, 10
 		};
 		static jumpSpeedParams BS{
-			0, 0, 0, 15, 1000, 15
+			0, 0, -4, 15, 1000, 15
 		};
 
 		if (arg == "backup") {
@@ -335,8 +358,10 @@ void jumpSpeed_func(std::string arg) {
 			BS_B.accel = pParams->boss.jumpSpeed.accel;
 			BS_B.limitUpSpeed = pParams->boss.jumpSpeed.limitUpSpeed;
 			BS_B.StickSpeed = pParams->boss.jumpSpeed.minStickSpeed;
+#if _DEBUG
 			NOTIFY("Backed up jumpSpeed params")
-			return;
+#endif
+				return;
 		}
 		if (arg == "apply") {
 			// whiteSpace
@@ -367,8 +392,10 @@ void jumpSpeed_func(std::string arg) {
 			pParams->boss.jumpSpeed.accel = BS.accel;
 			pParams->boss.jumpSpeed.limitUpSpeed = BS.limitUpSpeed;
 			pParams->boss.jumpSpeed.minStickSpeed = BS.StickSpeed;
+			#if _DEBUG
 			NOTIFY("Applied jumpSpeed params")
-			return;
+			#endif
+				return;
 		}
 		if (arg == "restore") {
 			// whiteSpace
@@ -399,7 +426,9 @@ void jumpSpeed_func(std::string arg) {
 			pParams->boss.jumpSpeed.accel = BS_B.accel;
 			pParams->boss.jumpSpeed.limitUpSpeed = BS_B.limitUpSpeed;
 			pParams->boss.jumpSpeed.minStickSpeed = BS_B.StickSpeed;
+			#if _DEBUG
 			NOTIFY("Restored jumpSpeed params")
+			#endif		
 			return;
 		}
 		return;
@@ -450,7 +479,9 @@ void player_common_tweak() {
 	pParams->boss.driftDash.maxSpeed = 100.0f;
 	pParams->boss.driftDash.outOfControlSpeed = 80.0f;
 	pParams->boss.spindash.minSpeed = 20.0f;
+#if _DEBUG
 	NOTIFY("APPLIED HARDCODE")
+#endif
 	// ... okay maybe not that big rn, but soon it'd be BIG 
 	// or not..
 	// should not be used for bundled dll in modpack
@@ -475,10 +506,10 @@ void pizdecSuperBiker3D(app::player::PlayerHsmContext* ctx, float deltaTime) {
 	else {
 		Eigen::Vector4f horVectornormalize = (horVector / horVector.norm());
 		ctx->gocPlayerKinematicParams->velocity = (horVectornormalize * (horVector.norm() - (bounceBreakForce * deltaTime)));
-		float finalX = ctx->gocPlayerKinematicParams->velocity.x();
-		float finalZ = ctx->gocPlayerKinematicParams->velocity.z();
-		csl::math::Vector4 final(finalX, Y, finalZ, 0);
-		ctx->gocPlayerKinematicParams->velocity = final;
+		//float finalX = ctx->gocPlayerKinematicParams->velocity.x();
+		//float finalZ = ctx->gocPlayerKinematicParams->velocity.z();
+		//csl::math::Vector4 final(finalX, Y, finalZ, 0);
+		//ctx->gocPlayerKinematicParams->velocity = final;
 	}
 	prevVelocity = ctx->gocPlayerKinematicParams->velocity;
 	#if _DEBUG
@@ -542,25 +573,30 @@ HOOK(void, __fastcall, InitPlayer, 0x14060DBC0, hh::game::GameObject* self) {
 	player_common_tweak();
 	jumpSpeed_func("backup");
 	bounceRFL("backup");
-	if (pBBstatus) {
-		pBBstatus->SetCombatFlag(app::player::BlackboardStatus::CombatFlag::SLALOM_STEP, 1);
-		NOTIFY("Enabled Slalom Step")
-	}
-	else {
-		NOTIFY("Failed to enable Slalom step")
-	}
+
+	//if (pBBstatus) {
+	//	pBBstatus->SetCombatFlag(app::player::BlackboardStatus::CombatFlag::SLALOM_STEP, 1);
+	//	NOTIFY("Enabled Slalom Step")
+	//}
+	//else {
+	//	NOTIFY("Failed to enable Slalom step")
+	//}
 }
 
 HOOK(void, __fastcall, Enter_Sliding, 0x1406CBB70, app::player::StateSliding* self, app::player::PlayerHsmContext* ctx, int previousState) {
 	if (previousState == 20) {
 		ctx->gocPlayerHsm->hsm.ChangeState(111, 0);
+		#if _DEBUG
 		NOTIFY("Rolling from squat")
+		#endif
 	}
 
 	if (previousState != 20) {
 		ctx->gocPlayerHsm->hsm.ChangeState(107, 0);
 		damageControl(ctx, false);
+		#if _DEBUG
 		NOTIFY("Rolling...")
+		#endif
 	}
 }
 
@@ -599,8 +635,12 @@ HOOK(bool, __fastcall, Step_DriftDash, 0x1406AFB70, app::player::StateDriftDash*
 	driftdash_inputs(ctx);
 	auto* pParams = hh::fnd::ResourceManager::GetInstance()->GetResource<hh::fnd::ResReflectionT<app::player::PlayerParameters>>("player_common")->GetData();
 	float vertVelocity = ctx->gocPlayerKinematicParams->velocity.y();
+	float speed = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->Speed.value();
 	//float yRotation = pGOCPlayerKinematic->GetRotation().y();
 
+	if (speed > 72.5f) {
+		ctx->blackboardStatus->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 1);
+	}
 	if (vertVelocity < -1.0f) {
 		pParams->forwardView.driftDash.brake = -4.0f;
 		pParams->whiteSpace.driftDash.brake = -4.0f;
@@ -622,8 +662,6 @@ HOOK(bool, __fastcall, Step_DriftDash, 0x1406AFB70, app::player::StateDriftDash*
 		pParams->boss.driftDash.brake = 10.0f;
 		return originalStep_DriftDash(self, ctx, deltaTime);
 	}
-
-
 }
 
 HOOK(void, __fastcall, Leave_DriftDash, 0x1406AF8D0, app::player::StateDriftDash* self, app::player::PlayerHsmContext* ctx, int nextState) {
@@ -639,18 +677,19 @@ HOOK(void, __fastcall, Enter_StompingDown, 0x14a85c590, app::player::StateStompi
 
 	csl::math::Vector4 currVelocity = ctx->gocPlayerKinematicParams->velocity;
 
-	prevVelocity = currVelocity;
+	float currX = currVelocity.x();
+	float currZ = currVelocity.z();
 
-	float prevX = prevVelocity.x();
-	float prevZ = prevVelocity.z();
-
-	NOTIFY("sample velocity on StompingDown");
+	prevVelocity = csl::math::Vector4(currX, 0, currZ, 0);
 #if _DEBUG
-	std::cout << "PrevX Enter is " << prevX << std::endl;
-	std::cout << "PrevZ Enter is " << prevZ << std::endl;
+	NOTIFY("sample velocity on StompingDown");
+	std::cout << "PrevX Enter is " << currX << std::endl;
+	std::cout << "PrevZ Enter is " << currZ << std::endl;
 #endif
 	Bouncinggg("sample", 1);
+	WriteProtected(0x014125fb89, "n");
 	originalEnter_StompingDown(self, ctx, previousState);
+	ctx->ChangeState("SPINJUMP");	
 }
 
 HOOK(bool, __fastcall, Step_StompingDown, 0x1406d1760, app::player::StateStompingDown* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
@@ -659,12 +698,12 @@ HOOK(bool, __fastcall, Step_StompingDown, 0x1406d1760, app::player::StateStompin
 	bool sideView = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->sideView_ns.value();
 	float yVel = ctx->gocPlayerKinematicParams->velocity.y();
 
-	//float altitudeNow = pLvlInfo->playerInformation->altitude.value();
+	//float altitudeNow = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->altitude.value();
 	//static float altitudeOneFrameAgo = 0;
 
 	//if (altitudeOneFrameAgo > 0) {
 	//	if (altitudeNow < fallToRollAtitude && altitudeNow != altitudeOneFrameAgo) {
-	//		pGOCPlayerHsm->hsm.ChangeState(111, 0);
+	//		ctx->gocPlayerHsm->hsm.ChangeState(111, 0);
 	//	}
 	//}
 	//if (altitudeOneFrameAgo != altitudeNow) {
@@ -674,15 +713,16 @@ HOOK(bool, __fastcall, Step_StompingDown, 0x1406d1760, app::player::StateStompin
 	// i wanted Shadow to transit into rolling if he is too close to the ground
 	// but, if there is no collision underneath him, game spits out the same altitude each frame
 	// and in this case this code breaks...
-
 	csl::math::Vector4 zero(0, yVel, 0, 0);
-
+	
 	originalStep_StompingDown(self, ctx, deltaTime);
 	if (circleHold) {
 		pizdecSuperBiker3D(ctx, deltaTime);
 		WantToBounce = true;
 		//DONTALLOW = true;
+#if _DEBUG
 		NOTIFY("BOUNCING")
+#endif
 			return 1;
 	}
 	if (currInput.norm() > deadZone && !circleHold && !sideView) {
@@ -691,20 +731,39 @@ HOOK(bool, __fastcall, Step_StompingDown, 0x1406d1760, app::player::StateStompin
 		return 1;
 	}
 	if (!circleHold || sideView) {
+		WriteProtected(0x014125fb89, "d");
 		prevVelocity = zero; // discard sample 
 		ctx->gocPlayerKinematicParams->velocity = zero;
 		originalStep_StompingDown(self, ctx, deltaTime);
 		WantToBounce = false;
+		//ctx->StopEffects();
 		//DONTALLOW = false;
 	}
 	return 1;
+}
+
+HOOK(void, __fastcall, Leave_StompingDown, 0x14A85DF40, app::player::StateStompingDown* self, app::player::PlayerHsmContext* ctx, int nextState) {
+	if (nextState != 11 || nextState != 63 || nextState != 9 || nextState != 10 || nextState != 24) {
+		ctx->StopEffects();
+	}
+	originalLeave_StompingDown(self, ctx, nextState);
+}
+
+HOOK(void, __fastcall, Enter_StompingLand, 0x1406D0430, app::player::StateStompingLand* self, app::player::PlayerHsmContext* ctx, int previousState) {
+	ctx->gocPlayerKinematicParams->velocity = csl::math::Vector4(0, 0, 0, 0);
+	originalEnter_StompingLand(self, ctx, previousState);
+	if (ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[7].state & 256 && WantToBounce) {	
+		ctx->gocPlayerHsm->hsm.ChangeState(11);
+		return;
+	}
 }
 
 HOOK(bool, __fastcall, Step_StompingLand, 0x1406d1d30, app::player::StateStompingLand* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	auto* pGOCInput = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent();
 	
 	if (pGOCInput->actionMonitors[7].state & 256 && WantToBounce) {
-		ctx->gocPlayerHsm->ChangeState(11,0);
+		originalStep_StompingLand(self, ctx, deltaTime);
+		ctx->gocPlayerHsm->hsm.ChangeState(11);
 	}
 	else {
 		originalStep_StompingLand(self, ctx, deltaTime);
@@ -718,11 +777,12 @@ HOOK(bool, __fastcall, Step_GrindDoubleJump, 0x1406BEAB0, app::player::StateGrin
 }
 
 HOOK(void, __fastcall, Enter_BounceJump, 0x1406C06E0, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, int previousState) {
-	auto* pLvlInfo = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>();
-	csl::math::Vector2 currentInput = pLvlInfo->playerInformation->leftStickInput.value();
+	csl::math::Vector2 currentInput = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->leftStickInput.value();
+	
 	bounceEnterInput = currentInput;
 	bounceEnterId = previousState;
 	std::cout << "Bounce previous State " << previousState << std::endl;
+	
 	if (currentInput.norm() < deadZone) {
 		Bouncinggg("null", 1);
 	}
@@ -734,19 +794,27 @@ HOOK(void, __fastcall, Enter_BounceJump, 0x1406C06E0, app::player::StateBounceJu
 	}
 	if (previousState == 55 /*&& currentInput.norm() > deadZone.norm()*/) {
 		Bouncinggg("apply", 1); // if bouncing, then we hack to retain velocity
+#if _DEBUG
 		NOTIFY("hacking bounce speed");
+#endif
 		originalEnter_BounceJump(self, ctx, previousState);
 	}
 	if (previousState != 55) {
 		jumpSpeed_func("apply");
 		originalEnter_BounceJump(self, ctx, previousState);
+#if _DEBUG	
 		NOTIFY("or.. not");
+#endif
 	}
 }
 
 HOOK(bool, __fastcall, Step_BounceJump, 0x1406C1C80, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	csl::math::Vector2 currInput = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->leftStickInput.value();
-
+	float speed = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->Speed.value();
+	float speed2 = ctx->gocPlayerKinematicParams->velocity.norm();
+	if (speed > 80.0f || speed2 > 85.0f) {
+		ctx->blackboardStatus->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 1);
+	}
 	if (!WantToBounce) {
 		jumpSpeed_func("apply");
 	}
@@ -770,9 +838,24 @@ HOOK(bool, __fastcall, Step_BounceJump, 0x1406C1C80, app::player::StateBounceJum
 HOOK(void, __fastcall, Leave_BounceJump, 0x1406C15F0, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, int nextState) {
 	jumpSpeed_func("restore");
 	bounceRFL("restore");
+	damageControl(ctx, 1);
 	originalLeave_BounceJump(self, ctx, nextState);
 }
 
+HOOK(bool, __fastcall, Step_AirBoost, 0x14A670E80, app::player::StateAirBoost* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+	originalStep_AirBoost(self, ctx, deltaTime);
+	if (ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[7].state & 512) {
+		ctx->ChangeState("SPINJUMP");
+	}
+	return 1;
+}
+HOOK(void, __fastcall, Enter_Fall, 0x1406B73E0, app::player::StateFall* self, app::player::PlayerHsmContext* ctx, int previousState) {
+	originalEnter_Fall(self, ctx, previousState);
+	if (previousState == 100) {
+		ctx->playerObject->GetComponent<hh::anim::GOCAnimator>()->animationStateMachine->ChangeState("WALLJUMP");
+	}
+	return;
+}
 
 BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID reserved)
 {
@@ -786,16 +869,20 @@ BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID res
 		INSTALL_HOOK(Step_SpinAttack);
 		INSTALL_HOOK(Step_DropDash);
 		INSTALL_HOOK(Step_SpinDash);
-		INSTALL_HOOK(Step_SlalomStep);
+		//INSTALL_HOOK(Step_SlalomStep);
 		INSTALL_HOOK(Step_DriftDash);
 		INSTALL_HOOK(Leave_DriftDash);
 		INSTALL_HOOK(Enter_StompingDown);
 		INSTALL_HOOK(Step_StompingDown);
-		INSTALL_HOOK(Step_StompingLand);
+		INSTALL_HOOK(Leave_StompingDown);
+		INSTALL_HOOK(Enter_StompingLand);
+		//INSTALL_HOOK(Enter_StompingLand);
 		INSTALL_HOOK(Step_GrindDoubleJump);		
 		INSTALL_HOOK(Enter_BounceJump);
 		INSTALL_HOOK(Step_BounceJump);
 		INSTALL_HOOK(Leave_BounceJump);
+		INSTALL_HOOK(Step_AirBoost);
+		INSTALL_HOOK(Enter_Fall);
 		break;
 	case DLL_PROCESS_DETACH:
 	case DLL_THREAD_ATTACH:
