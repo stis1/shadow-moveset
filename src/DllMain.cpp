@@ -12,6 +12,7 @@ static bool WantToBounce{};
 static bool rolling{};
 static csl::math::Vector2 bounceEnterInput{};
 static int bounceEnterId{};
+static int stompDownEnterId{};
 //
 
 float deadZone (0.045f); // deadzone of 15% on both X and Y axis 
@@ -251,12 +252,11 @@ void bouncejump_inputs(app::player::PlayerHsmContext* ctx) {
 	auto* pGOCInput = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent();
 	float Speed = pLvlInfo->playerInformation->Speed.value();
 
+	ctx->DoHoming(0);
+
 	if (pGOCInput->actionMonitors[7].state & 512 && rolling) {
 		ctx->gocPlayerHsm->ChangeState(4, 0);
 	}
-	//if (pGOCInput->actionMonitors[1].state & 512) {
-	//	ctx->gocPlayerHsm->ChangeState(63, 0);
-	//}
 	if (pGOCInput->actionMonitors[0].state & 512) {
 		ctx->gocPlayerHsm->ChangeState(10, 0);
 	}
@@ -512,11 +512,6 @@ void pizdecSuperBiker3D(app::player::PlayerHsmContext* ctx, float deltaTime) {
 		//ctx->gocPlayerKinematicParams->velocity = final;
 	}
 	prevVelocity = ctx->gocPlayerKinematicParams->velocity;
-	#if _DEBUG
-	std::cout << "Velocity X " << Velocity.x() << std::endl;
-	std::cout << "Velocity Y " << Velocity.y() << std::endl;
-	std::cout << "Velocity Z " << Velocity.z() << std::endl;
-	#endif
 }
 
 void Bouncinggg(std::string arg, float Multiplier) {
@@ -573,14 +568,6 @@ HOOK(void, __fastcall, InitPlayer, 0x14060DBC0, hh::game::GameObject* self) {
 	player_common_tweak();
 	jumpSpeed_func("backup");
 	bounceRFL("backup");
-
-	//if (pBBstatus) {
-	//	pBBstatus->SetCombatFlag(app::player::BlackboardStatus::CombatFlag::SLALOM_STEP, 1);
-	//	NOTIFY("Enabled Slalom Step")
-	//}
-	//else {
-	//	NOTIFY("Failed to enable Slalom step")
-	//}
 }
 
 HOOK(void, __fastcall, Enter_Sliding, 0x1406CBB70, app::player::StateSliding* self, app::player::PlayerHsmContext* ctx, int previousState) {
@@ -603,7 +590,7 @@ HOOK(void, __fastcall, Enter_Sliding, 0x1406CBB70, app::player::StateSliding* se
 HOOK(bool, __fastcall, Step_SpinAttack, 0x1406CB3E0, app::player::StateSpinAttack* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	bounceRFL("restore");
 	ctx->gocPlayerHsm->ChangeState(11, 0);
-	return originalStep_SpinAttack(self, ctx, deltaTime);
+	return 1;
 }
 
 HOOK(bool, __fastcall, Step_DropDash, 0x1406AFFB0, app::player::StateDropDash* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
@@ -672,20 +659,18 @@ HOOK(void, __fastcall, Leave_DriftDash, 0x1406AF8D0, app::player::StateDriftDash
 }
 
 HOOK(void, __fastcall, Enter_StompingDown, 0x14a85c590, app::player::StateStompingDown* self, app::player::PlayerHsmContext* ctx, int previousState) {
-	auto* pLvlInfo = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>();
-	float atitude = pLvlInfo->playerInformation->altitude.value();
-
+	float atitude = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->altitude.value();
 	csl::math::Vector4 currVelocity = ctx->gocPlayerKinematicParams->velocity;
-
 	float currX = currVelocity.x();
 	float currZ = currVelocity.z();
-
 	prevVelocity = csl::math::Vector4(currX, 0, currZ, 0);
+
 #if _DEBUG
 	NOTIFY("sample velocity on StompingDown");
 	std::cout << "PrevX Enter is " << currX << std::endl;
 	std::cout << "PrevZ Enter is " << currZ << std::endl;
 #endif
+	stompDownEnterId = previousState;
 	Bouncinggg("sample", 1);
 	WriteProtected(0x014125fb89, "n");
 	originalEnter_StompingDown(self, ctx, previousState);
@@ -694,13 +679,17 @@ HOOK(void, __fastcall, Enter_StompingDown, 0x14a85c590, app::player::StateStompi
 
 HOOK(bool, __fastcall, Step_StompingDown, 0x1406d1760, app::player::StateStompingDown* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	csl::math::Vector2 currInput = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->leftStickInput.value();
+	bool crossTap = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[0].state & 512;
 	bool circleHold = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[7].state & 256;
 	bool sideView = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->sideView_ns.value();
 	float yVel = ctx->gocPlayerKinematicParams->velocity.y();
-
+	float xVel = ctx->gocPlayerKinematicParams->velocity.x();
+	float zVel = ctx->gocPlayerKinematicParams->velocity.z();
+	
+	//static bool wasI{};
 	//float altitudeNow = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->altitude.value();
 	//static float altitudeOneFrameAgo = 0;
-
+	// 
 	//if (altitudeOneFrameAgo > 0) {
 	//	if (altitudeNow < fallToRollAtitude && altitudeNow != altitudeOneFrameAgo) {
 	//		ctx->gocPlayerHsm->hsm.ChangeState(111, 0);
@@ -713,10 +702,17 @@ HOOK(bool, __fastcall, Step_StompingDown, 0x1406d1760, app::player::StateStompin
 	// i wanted Shadow to transit into rolling if he is too close to the ground
 	// but, if there is no collision underneath him, game spits out the same altitude each frame
 	// and in this case this code breaks...
-	csl::math::Vector4 zero(0, yVel, 0, 0);
 	
+	csl::math::Vector4 zero(0, yVel, 0, 0);
+	csl::math::Vector4 zeroY(xVel, 0, zVel, 0);
+	if (crossTap) {
+		ctx->gocPlayerHsm->ChangeState(10, 0);
+	}
 	originalStep_StompingDown(self, ctx, deltaTime);
-	if (circleHold) {
+	if (currInput.norm() > deadZone && circleHold) {
+		if (stompDownEnterId == 155) {
+			ctx->gocPlayerKinematicParams->velocity = zeroY;
+		}
 		pizdecSuperBiker3D(ctx, deltaTime);
 		WantToBounce = true;
 		//DONTALLOW = true;
@@ -726,17 +722,24 @@ HOOK(bool, __fastcall, Step_StompingDown, 0x1406d1760, app::player::StateStompin
 			return 1;
 	}
 	if (currInput.norm() > deadZone && !circleHold && !sideView) {
+		if (stompDownEnterId == 155) {
+			ctx->gocPlayerKinematicParams->velocity = zeroY;
+		}
 		pizdecSuperBiker3D(ctx, deltaTime);
 		WantToBounce = false;
 		return 1;
 	}
 	if (!circleHold || sideView) {
+		
 		WriteProtected(0x014125fb89, "d");
 		prevVelocity = zero; // discard sample 
 		ctx->gocPlayerKinematicParams->velocity = zero;
 		originalStep_StompingDown(self, ctx, deltaTime);
 		WantToBounce = false;
-		//ctx->StopEffects();
+		ctx->StopEffects();
+		//if (wasI < 1) {
+		//	ctx->playerObject->GetComponent<hh::anim::GOCAnimator>()->ChangeState("")
+		//}
 		//DONTALLOW = false;
 	}
 	return 1;
@@ -781,8 +784,9 @@ HOOK(void, __fastcall, Enter_BounceJump, 0x1406C06E0, app::player::StateBounceJu
 	
 	bounceEnterInput = currentInput;
 	bounceEnterId = previousState;
+	#if _DEBUG
 	std::cout << "Bounce previous State " << previousState << std::endl;
-	
+	#endif
 	if (currentInput.norm() < deadZone) {
 		Bouncinggg("null", 1);
 	}
@@ -857,6 +861,24 @@ HOOK(void, __fastcall, Enter_Fall, 0x1406B73E0, app::player::StateFall* self, ap
 	return;
 }
 
+HOOK(void, __fastcall, Enter_Run, 0x1406C7000, app::player::StateRun* self, app::player::PlayerHsmContext* ctx, int previousState) {
+	std::cout << "previous and bounceEnterID: " << previousState << " " << bounceEnterId << std::endl;
+	if (previousState == 11 && bounceEnterId == 107) {
+		ctx->gocPlayerHsm->hsm.ChangeState(107);
+	}
+	else {
+		originalEnter_Run(self, ctx, previousState);
+	}
+}
+
+HOOK(bool, __fastcall, ProcessMsg_StompingDown, 0x1406D10C0, app::player::StateStompingDown* self, app::player::PlayerHsmContext* ctx, hh::fnd::Message* message) {
+	bool circleHold = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[7].state & 256;
+	//if (message == )
+	std::cout << "MESSAGE I SAY FUCKING MESSAGE: " << message << "  CIRCLE STAT: " << circleHold << std::endl;
+
+	return originalProcessMsg_StompingDown(self, ctx, message);
+}
+
 BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID reserved)
 {
 	switch (reason)
@@ -883,6 +905,8 @@ BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID res
 		INSTALL_HOOK(Leave_BounceJump);
 		INSTALL_HOOK(Step_AirBoost);
 		INSTALL_HOOK(Enter_Fall);
+		INSTALL_HOOK(Enter_Run);
+		//INSTALL_HOOK(ProcessMsg_StompingDown);
 		break;
 	case DLL_PROCESS_DETACH:
 	case DLL_THREAD_ATTACH:
