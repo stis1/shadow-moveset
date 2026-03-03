@@ -6,7 +6,7 @@ dummy. TBD
 
 You will need to have the following prerequisites installed:
 
-* Visual Studio 2022
+* Visual Studio 2022 or higher (the purple one)
 * CMake 3.28 or higher
 * Git
 
@@ -29,7 +29,7 @@ with the `GAME_FOLDER` variable:
 cmake -A x64 -B build -DGAME_FOLDER="C:\ShadowFrontiers"
 ```
 
-Once CMake is finished, navigate to the build directory and open `shadow-moveset.sln` with VS2022.
+Once CMake is finished, navigate to the build directory and open `shadow-moveset.sln` with Visual Studio.
 You should have a fully working environment available.
 
 Building the INSTALL project will install the mod into HedgeModManager's `Mods` directory.
