@@ -295,7 +295,7 @@ void pizdecSuperBiker3D(app::player::PlayerHsmContext* ctx, float deltaTime) {
 	prevVelocity = ctx->gocPlayerKinematicParams->velocity;
 }
 
-void Bouncinggg(std::string arg, float Multiplier) {
+void Bouncinggg(std::string arg, float Multiplier, bool directionChanged) {
 	auto* pParams = hh::fnd::ResourceManager::GetInstance()->GetResource<hh::fnd::ResReflectionT<app::player::PlayerParameters>>("player_common")->GetData();
 	
 	float Speed = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->Speed.value();
@@ -303,6 +303,7 @@ void Bouncinggg(std::string arg, float Multiplier) {
 
 	if (arg == "null") {
 		SampleSpeed = 5;
+		return;
 	}
 	if (arg == "sample") {
 		SampleSpeed = Speed;
@@ -314,10 +315,18 @@ void Bouncinggg(std::string arg, float Multiplier) {
 		pParams->forwardView.jumpSpeed.limitUpSpeed = SampleSpeed;
 		pParams->sideView.jumpSpeed.limitUpSpeed = SampleSpeed;
 		pParams->boss.jumpSpeed.limitUpSpeed = SampleSpeed;
-		pParams->whiteSpace.jumpSpeed.minStickSpeed = SampleSpeed;
-		pParams->forwardView.jumpSpeed.minStickSpeed = SampleSpeed;
-		pParams->sideView.jumpSpeed.minStickSpeed = SampleSpeed;
-		pParams->boss.jumpSpeed.minStickSpeed = SampleSpeed;
+		if (directionChanged) {
+			pParams->whiteSpace.jumpSpeed.minStickSpeed = SampleSpeed*0.5f;
+			pParams->forwardView.jumpSpeed.minStickSpeed = SampleSpeed*0.5f;
+			pParams->sideView.jumpSpeed.minStickSpeed = SampleSpeed*0.5f;
+			pParams->boss.jumpSpeed.minStickSpeed = SampleSpeed*0.5f;
+		}
+		else {
+			pParams->whiteSpace.jumpSpeed.minStickSpeed = SampleSpeed;
+			pParams->forwardView.jumpSpeed.minStickSpeed = SampleSpeed;
+			pParams->sideView.jumpSpeed.minStickSpeed = SampleSpeed;
+			pParams->boss.jumpSpeed.minStickSpeed = SampleSpeed;
+		}
 		if (Multiplier < 0.09) {
 			pParams->whiteSpace.jumpSpeed.brake = 75;
 			pParams->forwardView.jumpSpeed.brake = 75;
@@ -349,6 +358,7 @@ HOOK(void, __fastcall, InitPlayer, 0x14060DBC0, hh::game::GameObject* self) {
 	//rfl_idiotism::player_common_tweak();
 	rfl_idiotism::jump_speed_func("backup");
 	rfl_idiotism::bounceRFL("backup");
+	WriteProtected<byte>(0x01406e0bd6, 0x75); // replacing jz with jnz iirc to avoid StateWallJump 0.000099999997 seconds timer
 }
 
 HOOK(void, __fastcall, Enter_Sliding, 0x1406CBB70, app::player::StateSliding* self, app::player::PlayerHsmContext* ctx, int previousState) {
@@ -452,17 +462,20 @@ HOOK(void, __fastcall, Enter_StompingDown, 0x14a85c590, app::player::StateStompi
 	std::cout << "PrevZ Enter is " << currZ << std::endl;
 #endif
 	stompDownEnterId = previousState;
-	Bouncinggg("sample", 1);
+	Bouncinggg("sample", 1, 0);
 	WriteProtected(0x014125fb89, "n");
 	originalEnter_StompingDown(self, ctx, previousState);
 	ctx->ChangeState("SPINJUMP");	
 }
 
 HOOK(bool, __fastcall, Step_StompingDown, 0x1406d1760, app::player::StateStompingDown* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+	//if (ctx->DoHoming(0)) {
+	//	return 1;
+	//}
 	bool crossTap = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[0].state & 512;
 	if (crossTap) {
 		ctx->gocPlayerHsm->ChangeState(10, 0);
-		return 1;
+		return 0;
 	}
 	//bool isAutoRun = ctx->blackboardStatus->GetWorldFlag(app::player::BlackboardStatus::WorldFlag::AUTO_RUN);
 	//if (isAutoRun) {
@@ -474,10 +487,12 @@ HOOK(bool, __fastcall, Step_StompingDown, 0x1406d1760, app::player::StateStompin
 	csl::math::Vector2 currInput = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->leftStickInput.value();
 	bool circleHold = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[7].state & 256;
 	bool sideView = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->sideView_ns.value();
+	bool isGrounded = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->isGrounded.value();
 	float yVel = ctx->gocPlayerKinematicParams->velocity.y();
 	float xVel = ctx->gocPlayerKinematicParams->velocity.x();
 	float zVel = ctx->gocPlayerKinematicParams->velocity.z();
 	
+
 	//static bool wasI{};
 	//float altitudeNow = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->altitude.value();
 	//static float altitudeOneFrameAgo = 0;
@@ -496,43 +511,42 @@ HOOK(bool, __fastcall, Step_StompingDown, 0x1406d1760, app::player::StateStompin
 	// and in this case this code breaks...
 	
 	csl::math::Vector4 zero(0, yVel, 0, 0);
-	csl::math::Vector4 zeroY(xVel, 0, zVel, 0);
 	
-	originalStep_StompingDown(self, ctx, deltaTime);
 	if (currInput.norm() > deadZone && circleHold) {
-		if (stompDownEnterId == 155) {
-			ctx->gocPlayerKinematicParams->velocity = zeroY;
+		if (!isGrounded) // doesn't work like i want it, how can i get to know whether Shadow touched dashpanel?
+		{
+			pizdecSuperBiker3D(ctx, deltaTime);
+			WantToBounce = true;
 		}
-		pizdecSuperBiker3D(ctx, deltaTime);
-		WantToBounce = true;
-		//DONTALLOW = true;
-#if _DEBUG
-		NOTIFY("BOUNCING")
-#endif
-			return 1;
+		//if (stompDownEnterId == 155) {
+		//	ctx->gocPlayerKinematicParams->velocity = csl::math::Vector4(xVel, 0, zVel, 0); // Zero out Y
+		//}
+		bool res = originalStep_StompingDown(self, ctx, deltaTime);
+		std::cout << res << std::endl;
+		return res;
 	}
 	if (currInput.norm() > deadZone && !circleHold && !sideView) {
-		if (stompDownEnterId == 155) {
-			ctx->gocPlayerKinematicParams->velocity = zeroY;
+		//if (stompDownEnterId == 155) {
+		//	ctx->gocPlayerKinematicParams->velocity = csl::math::Vector4(xVel, 0, zVel, 0); // Zero out Y
+		//}
+		if (!isGrounded) {
+			pizdecSuperBiker3D(ctx, deltaTime);
+			WantToBounce = false;
 		}
-		pizdecSuperBiker3D(ctx, deltaTime);
-		WantToBounce = false;
-		return 1;
+		bool res = originalStep_StompingDown(self, ctx, deltaTime);
+		std::cout << res << std::endl;
+		return res;
 	}
-	if (!circleHold || sideView) {
-		
-		WriteProtected(0x014125fb89, "d");
-		prevVelocity = zero; // discard sample 
-		ctx->gocPlayerKinematicParams->velocity = zero;
-		originalStep_StompingDown(self, ctx, deltaTime);
+	if (sideView && !circleHold) {
+		prevVelocity = csl::math::Vector4(0, yVel, 0, 0); // Discard sample 
+		ctx->gocPlayerKinematicParams->velocity = csl::math::Vector4(0, yVel, 0, 0); // Zero out horVelocity
 		WantToBounce = false;
 		ctx->StopEffects();
-		//if (wasI < 1) {
-		//	ctx->playerObject->GetComponent<hh::anim::GOCAnimator>()->ChangeState("")
-		//}
-		//DONTALLOW = false;
+		bool res = originalStep_StompingDown(self, ctx, deltaTime);
+		std::cout << res << std::endl;
+		return res;
 	}
-	return 1;
+	return originalStep_StompingDown(self, ctx, deltaTime);
 }
 
 HOOK(void, __fastcall, Leave_StompingDown, 0x14A85DF40, app::player::StateStompingDown* self, app::player::PlayerHsmContext* ctx, int nextState) {
@@ -578,7 +592,7 @@ HOOK(void, __fastcall, Enter_BounceJump, 0x1406C06E0, app::player::StateBounceJu
 	std::cout << "Bounce previous State " << previousState << std::endl;
 	#endif
 	if (currentInput.norm() < deadZone) {
-		Bouncinggg("null", 1);
+		Bouncinggg("null", 1, 0);
 	}
 	if (previousState == 107) {
 		rolling = true;
@@ -587,7 +601,7 @@ HOOK(void, __fastcall, Enter_BounceJump, 0x1406C06E0, app::player::StateBounceJu
 		rolling = false;
 	}
 	if (previousState == 55 /*&& currentInput.norm() > deadZone.norm()*/) {
-		Bouncinggg("apply", 1); // if bouncing, then we hack to retain velocity
+		Bouncinggg("apply", 1, 0); // if bouncing, then we hack to retain velocity
 #if _DEBUG
 		NOTIFY("hacking bounce speed");
 #endif
@@ -616,7 +630,7 @@ HOOK(bool, __fastcall, Step_BounceJump, 0x1406C1C80, app::player::StateBounceJum
 	{
 		float mult = currInput.norm() / bounceEnterInput.norm();
 		if (mult >= 0.05 && currInput.norm() < bounceEnterInput.norm()) {
-			Bouncinggg("apply", mult);
+			Bouncinggg("apply", mult, 0);
 		}
 		if (mult < 0.05) {
 			rfl_idiotism::jump_speed_func("apply");
@@ -644,16 +658,39 @@ HOOK(bool, __fastcall, Step_AirBoost, 0x14A670E80, app::player::StateAirBoost* s
 	return 1;
 }
 
-HOOK(void, __fastcall, Enter_Fall, 0x1406B73E0, app::player::StateFall* self, app::player::PlayerHsmContext* ctx, int previousState) {
-	originalEnter_Fall(self, ctx, previousState);
-	if (previousState == 100) {
-		ctx->playerObject->GetComponent<hh::anim::GOCAnimator>()->animationStateMachine->ChangeState("WALLJUMP");
+HOOK(void, __fastcall, Enter_DamageRoot, 0x1406A1AE0, app::player::StateDamageRoot* self, app::player::PlayerHsmContext* ctx, int previousState) {
+	if (previousState == 25) {
+		ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardBattle>()->SetFlag020(1);
+		ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(2, 0);
 	}
+	originalEnter_DamageRoot(self, ctx, previousState);
+	return;
+}
+
+HOOK(void, __fastcall, Enter_Stand, 0x14A81CEA0, app::player::StateStand* self, app::player::PlayerHsmContext* ctx, int previousState) {
+	if (previousState == 25) {
+		ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardBattle>()->SetFlag020(1);
+		ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(2, 0);
+	}
+	originalEnter_Stand(self, ctx, previousState);
+	return;
+}
+
+HOOK(void, __fastcall, Enter_Fall, 0x1406B73E0, app::player::StateFall* self, app::player::PlayerHsmContext* ctx, int previousState) {
+	if (previousState == 25) {
+		ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardBattle>()->SetFlag020(1);
+		ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(2, 0);
+	}
+	originalEnter_Fall(self, ctx, previousState);
 	return;
 }
 
 HOOK(void, __fastcall, Enter_Run, 0x1406C7000, app::player::StateRun* self, app::player::PlayerHsmContext* ctx, int previousState) {
 	std::cout << "previous and bounceEnterID: " << previousState << " " << bounceEnterId << std::endl;
+	if (previousState == 25) {
+		ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardBattle>()->SetFlag020(1);
+		ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(2, 0);
+	}
 	if (previousState == 11 && bounceEnterId == 107) {
 		ctx->gocPlayerHsm->hsm.ChangeState(107);
 	}
@@ -662,13 +699,12 @@ HOOK(void, __fastcall, Enter_Run, 0x1406C7000, app::player::StateRun* self, app:
 	}
 }
 
-HOOK(bool, __fastcall, ProcessMsg_StompingDown, 0x1406D10C0, app::player::StateStompingDown* self, app::player::PlayerHsmContext* ctx, hh::fnd::Message* message) {
-	bool circleHold = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[7].state & 256;
-	//if (message == )
-	std::cout << "MESSAGE I SAY FUCKING MESSAGE: " << message << "  CIRCLE STAT: " << circleHold << std::endl;
-
-	return originalProcessMsg_StompingDown(self, ctx, message);
+HOOK(void, __fastcall, Enter_LightDash, 0x1406c2f80, app::player::StateLightDash* self, app::player::PlayerHsmContext* ctx, int previousState) {
+	originalEnter_LightDash(self, ctx, previousState);
+	ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(2, 1);
+	return;
 }
+
 
 BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID reserved)
 {
@@ -695,9 +731,11 @@ BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID res
 		INSTALL_HOOK(Step_BounceJump);
 		INSTALL_HOOK(Leave_BounceJump);
 		INSTALL_HOOK(Step_AirBoost);
+		INSTALL_HOOK(Enter_DamageRoot); // these 4 are because LightDash doesn't have LeavePlayerState
+		INSTALL_HOOK(Enter_Stand);
 		INSTALL_HOOK(Enter_Fall);
 		INSTALL_HOOK(Enter_Run);
-		//INSTALL_HOOK(ProcessMsg_StompingDown);
+		INSTALL_HOOK(Enter_LightDash);
 		break;
 	case DLL_PROCESS_DETACH:
 	case DLL_THREAD_ATTACH:
