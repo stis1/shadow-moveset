@@ -42,7 +42,7 @@ void WriteProtected(uintptr_t address, T value) {
 void checkHomingReticle() {
 	auto* pGameManager = hh::game::GameManager::GetInstance();
 	auto* pCursor = pGameManager->GetGameObject("Cursor");
-	//auto* pGOCTinyFsm =(GOCTinyFsm2<UICursor)
+	//auto* pGOCTinyFsm =(GOCTinyFsm2<UICursor) // GOD FUCKING DAMN IT
 }
 
 void damageControl(app::player::PlayerHsmContext* ctx, bool leaveMeAlone) {
@@ -277,12 +277,15 @@ void drop_driftdash_transition(app::player::PlayerHsmContext* ctx, float deltaTi
 }
 
 void pizdecSuperBiker3D(app::player::PlayerHsmContext* ctx, float deltaTime) {
-	float Y = ctx->gocPlayerKinematicParams->velocity.y();
-	
-	const float bounceBreakForce = 20.0f;
-
 	float prevX = prevVelocity.x();
 	float prevZ = prevVelocity.z();
+	if (prevX == 0 && prevZ == 0) {
+		return; // discarded samples, return immediately;
+	}
+
+	float Y = ctx->gocPlayerKinematicParams->velocity.y();
+	const float bounceBreakForce = 20.0f;
+
 	csl::math::Vector4 horVector(prevX, Y, prevZ, 0);
 	#if _DEBUG
 	std::cout << "PrevX infunc is " << prevX << std::endl;
@@ -465,8 +468,10 @@ HOOK(void, __fastcall, Enter_StompingDown, 0x14a85c590, app::player::StateStompi
 #endif
 	stompDownEnterId = previousState;
 	Bouncinggg("sample", 1, 0);
-	WriteProtected(0x014125fb89, "n");
 	originalEnter_StompingDown(self, ctx, previousState);
+	if (previousState == 24) {
+		ctx->StopEffects(); // don't ask me about this
+	}
 	ctx->ChangeState("SPINJUMP");
 	wasI = false;
 }
@@ -520,7 +525,6 @@ HOOK(bool, __fastcall, Step_StompingDown, 0x1406d1760, app::player::StateStompin
 				WantToBounce = false;
 				ctx->StopEffects();
 			}
-			return originalStep_StompingDown(self, ctx, deltaTime);
 		}
 	}
 	return originalStep_StompingDown(self, ctx, deltaTime);
@@ -636,10 +640,10 @@ HOOK(bool, __fastcall, Step_AirBoost, 0x14A670E80, app::player::StateAirBoost* s
 		return 1;
 	}
 	originalStep_AirBoost(self, ctx, deltaTime);
-	if (ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[7].state & 512) {
-		ctx->ChangeState("SPINJUMP");
-	}
-	return 1;
+	//if (ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[7].state & 512) {
+	//	ctx->ChangeState("SPINJUMP");
+	//	return 1;
+	//}
 }
 
 HOOK(void, __fastcall, Enter_DamageRoot, 0x1406A1AE0, app::player::StateDamageRoot* self, app::player::PlayerHsmContext* ctx, int previousState) {
@@ -676,9 +680,11 @@ HOOK(void, __fastcall, Enter_Run, 0x1406C7000, app::player::StateRun* self, app:
 	if (previousState == 25) {
 		ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardBattle>()->SetFlag020(1);
 		ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(2, 0);
+		return originalEnter_Run(self, ctx, previousState);
 	}
 	if (previousState == 11 && bounceEnterId == 107) {
 		ctx->gocPlayerHsm->hsm.ChangeState(107);
+		return;
 	}
 	//bool r2Hold = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[3].state & 256;
 	//if (previousState == 24 && r2Hold) {
@@ -718,7 +724,7 @@ BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID res
 		INSTALL_HOOK(Step_BounceJump);
 		INSTALL_HOOK(Leave_BounceJump);
 		INSTALL_HOOK(Step_AirBoost);
-		INSTALL_HOOK(Enter_DamageRoot); // these 4 are because LightDash doesn't have LeavePlayerState
+		INSTALL_HOOK(Enter_DamageRoot); // these 5 are because LightDash doesn't have LeavePlayerState
 		INSTALL_HOOK(Enter_Stand);
 		INSTALL_HOOK(Enter_Fall);
 		INSTALL_HOOK(Enter_Run);
