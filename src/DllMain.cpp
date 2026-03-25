@@ -13,6 +13,8 @@ static bool rolling{};
 static csl::math::Vector2 bounceEnterInput{};
 static int bounceEnterId{};
 static int stompDownEnterId{};
+static float divingIdleTimer{};
+static bool divingIdleStatus{};
 // i want kms
 
 float deadZone (0.045f); // deadzone of 15% on both X and Y axis, magnitude of vector2(0.15,0.15)
@@ -49,7 +51,7 @@ void damageControl(app::player::PlayerHsmContext* ctx, bool leaveMeAlone) {
 	auto* pPluginCollision = ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>();
 	auto* pBBbattle = ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardBattle>();
 	
-	static bool isInBallState = false;
+	static bool isInBallState{};
 
 	bool isBoosting = ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardStatus>()->GetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST);
 	int getID = ctx->gocPlayerHsm->GetCurrentState();
@@ -186,11 +188,9 @@ void driftdash_inputs(app::player::PlayerHsmContext* ctx) {
 	}
 	// player input
 	auto* pGOCInput = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent();
-	bool boostHeld = pGOCInput->actionMonitors[3].state & 256; // 3 is action, 256 or 512 is whether held or tapped
-	bool boostTap = pGOCInput->actionMonitors[3].state & 512;
+	 // 3 is action, 256 or 512 is whether held or tapped
 	bool circleTap = pGOCInput->actionMonitors[7].state & 512;
 	bool crossTap = pGOCInput->actionMonitors[0].state & 512;
-	bool squareTap = pGOCInput->actionMonitors[1].state & 512;
 
 	if (circleTap) {
 		Redirect(ctx, run);
@@ -200,6 +200,8 @@ void driftdash_inputs(app::player::PlayerHsmContext* ctx) {
 		Redirect(ctx, jump);
 		return;
 	}
+	bool boostHeld = pGOCInput->actionMonitors[3].state & 256;
+	bool boostTap = pGOCInput->actionMonitors[3].state & 512;
 	if (boostHeld) // if boost button is pressed, don't give a choice to return to boost // 
 	{
 		ctx->blackboardStatus->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 0);
@@ -366,6 +368,7 @@ HOOK(void, __fastcall, InitPlayer, 0x14060DBC0, hh::game::GameObject* self) {
 	rfl_idiotism::jump_speed_func("backup");
 	rfl_idiotism::bounceRFL("backup");
 	WriteProtected<byte>(0x01406e0bd6, 0x75); // replacing jz with jnz iirc to avoid StateWallJump 0.000099999997 seconds timer
+	
 }
 
 HOOK(void, __fastcall, Enter_Sliding, 0x1406CBB70, app::player::StateSliding* self, app::player::PlayerHsmContext* ctx, int previousState) {
@@ -452,6 +455,39 @@ HOOK(void, __fastcall, Leave_DriftDash, 0x1406AF8D0, app::player::StateDriftDash
 	originalLeave_DriftDash(self, ctx, nextState);
 	ctx->playerObject->GetComponent<app::player::GOCPlayerCollider>()->GetPlayerCollision()->qword2C = 0.5f;
 	
+}
+
+HOOK(bool, __fastcall, Step_Diving, 0x1406AD600, app::player::StateDiving* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+	float currInput = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->leftStickInput.value().norm();
+	if (currInput < deadZone) {
+		if (divingIdleTimer < 5.0f && !divingIdleStatus) {
+			divingIdleTimer += deltaTime;
+			return originalStep_Diving(self, ctx, deltaTime);
+		}
+		if (divingIdleTimer > 2.0f && divingIdleStatus) {
+			ctx->playerObject->GetComponent<hh::anim::GOCAnimator>()->ChangeState("DIVE");
+			divingIdleStatus = false;
+			divingIdleTimer = 0.0f;
+			return originalStep_Diving(self, ctx, deltaTime);
+		}
+		if (divingIdleTimer >= 5.0f) {
+			ctx->playerObject->GetComponent<hh::anim::GOCAnimator>()->ChangeState("DIVE_IDLE_START");
+			divingIdleStatus = true;
+			divingIdleTimer = 0.0f;
+			return originalStep_Diving(self, ctx, deltaTime);
+		}
+	}
+	else {
+		divingIdleStatus = false;
+		divingIdleTimer = 0;
+		return originalStep_Diving(self, ctx, deltaTime);
+	}
+}
+
+HOOK(void, __fastcall, Leave_Diving, 0x1406ACEB0, app::player::StateDiving* self, app::player::PlayerHsmContext* ctx, int nextState) {
+	divingIdleTimer = 0;
+	divingIdleStatus = false;
+	originalLeave_Diving(self, ctx, nextState);
 }
 
 HOOK(void, __fastcall, Enter_StompingDown, 0x14a85c590, app::player::StateStompingDown* self, app::player::PlayerHsmContext* ctx, int previousState) {
@@ -564,6 +600,21 @@ HOOK(bool, __fastcall, Step_GrindDoubleJump, 0x1406BEAB0, app::player::StateGrin
 	return originalStep_GrindDoubleJump(self, ctx, deltaTime);
 }
 
+HOOK(bool, __fastcall, ProcessMsg_GrindDoubleJump, 0x1406BE330, app::player::StateGrindDoubleJump* self, app::player::PlayerHsmContext* ctx, const hh::fnd::Message* message) {
+	if (message->ID == hh::fnd::MessageID::EightFourNineSeven) {
+		ctx->gocPlayerHsm->ChangeState(11, 0);
+		return 1;
+	}
+	if (message->ID == hh::fnd::MessageID::EightThreeThreeSix) {
+		ctx->gocPlayerHsm->ChangeState(28, 0); // evil way, wanted to patch stateID, but it didn't work, blep
+		ctx->gocPlayerHsm->ChangeState(30, 0);
+		return 1;
+	}
+	else {
+		return originalProcessMsg_GrindDoubleJump(self, ctx, message);
+	}
+}
+
 HOOK(void, __fastcall, Enter_BounceJump, 0x1406C06E0, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, int previousState) {
 	csl::math::Vector2 currentInput = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->leftStickInput.value();
 	
@@ -639,7 +690,7 @@ HOOK(bool, __fastcall, Step_AirBoost, 0x14A670E80, app::player::StateAirBoost* s
 		ctx->gocPlayerHsm->ChangeState(10, 0);
 		return 1;
 	}
-	originalStep_AirBoost(self, ctx, deltaTime);
+	return originalStep_AirBoost(self, ctx, deltaTime);
 	//if (ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[7].state & 512) {
 	//	ctx->ChangeState("SPINJUMP");
 	//	return 1;
@@ -686,10 +737,10 @@ HOOK(void, __fastcall, Enter_Run, 0x1406C7000, app::player::StateRun* self, app:
 		ctx->gocPlayerHsm->hsm.ChangeState(107);
 		return;
 	}
-	//bool r2Hold = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[3].state & 256;
-	//if (previousState == 24 && r2Hold) {
-	//	ctx->blackboardStatus->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 1);
-	//} 
+	bool r2Hold = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[3].state & 256;
+	if (previousState == 24 && r2Hold) {
+		ctx->blackboardStatus->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 1);
+	} 
 	return originalEnter_Run(self, ctx, previousState);
 }
 
@@ -715,11 +766,14 @@ BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID res
 		//INSTALL_HOOK(Step_SlalomStep);
 		INSTALL_HOOK(Step_DriftDash);
 		INSTALL_HOOK(Leave_DriftDash);
+		INSTALL_HOOK(Step_Diving);
+		INSTALL_HOOK(Leave_Diving);
 		INSTALL_HOOK(Enter_StompingDown);
 		INSTALL_HOOK(Step_StompingDown);
 		INSTALL_HOOK(Leave_StompingDown);
 		INSTALL_HOOK(Enter_StompingLand);
-		INSTALL_HOOK(Step_GrindDoubleJump);		
+		INSTALL_HOOK(Step_GrindDoubleJump);	
+		INSTALL_HOOK(ProcessMsg_GrindDoubleJump);
 		INSTALL_HOOK(Enter_BounceJump);
 		INSTALL_HOOK(Step_BounceJump);
 		INSTALL_HOOK(Leave_BounceJump);
