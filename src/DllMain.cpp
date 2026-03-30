@@ -18,7 +18,9 @@ static float divingIdleTimer{};
 static bool divingIdleStatus{};
 static float jumpTimer{};
 static bool jumpStatus{};
-// i want kms
+static bool jumpAnimStatus{};
+static float wallJumpTimer{};
+// i want kms because of these timers
 
 float deadZone (0.045f); // deadzone of 15% on both X and Y axis, magnitude of vector2(0.15,0.15)
 
@@ -44,7 +46,9 @@ void WriteProtected(uintptr_t address, T value) {
 	VirtualProtect(reinterpret_cast<void*>(address), sizeof(T), oldProtect, &oldProtect);
 }
 
-void Leave_LightDash(app::player::PlayerHsmContext* ctx);
+void Leave_LightDash(app::player::StateLightDash* self, app::player::PlayerHsmContext* ctx, int nextState);
+
+void Leave_WallJump(app::player::StateWallJump* self, app::player::PlayerHsmContext* ctx, int nextState);
 
 void patch_Step_StateWallJump() {
 	// replacing jz with jnz iirc to avoid StateWallJump transiting into StateFall for some reason
@@ -61,13 +65,24 @@ void patch_Step_StateJump() {
 	WriteProtected<byte>(0x14A7C123F, 0x90); // nop
 }
 
+void patch_Leave_StateWallJump() {
+	WriteProtected<void*>(0x1412631A0, &Leave_WallJump);
+}
+
 void patch_Leave_StateLightDash() {
 	WriteProtected<void*>(0x14125BED8, &Leave_LightDash);
 }
-void Leave_LightDash(app::player::PlayerHsmContext* ctx) {
+
+void Leave_WallJump(app::player::StateWallJump* self, app::player::PlayerHsmContext* ctx, int nextState) {
+	wallJumpTimer = 0.0f;
+	return;
+}
+
+void Leave_LightDash(app::player::StateLightDash* self, app::player::PlayerHsmContext* ctx, int nextState) {
 	// Thank You Ash and Zor
 	ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardBattle>()->SetFlag020(1);
 	ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(2, 0);
+	return;
 } 
 
 void damageControl(app::player::PlayerHsmContext* ctx, bool leaveMeAlone) {
@@ -436,7 +451,7 @@ HOOK(bool, __fastcall, Step_DriftDash, 0x1406AFB70, app::player::StateDriftDash*
 	}
 	if (vertVelocity < -1.0f) {
 		params->forwardView.driftDash.brake = vertVelocity * 0.5f;
-		params->whiteSpace.driftDash.brake = vertVelocity * 0.5f;
+		params->whiteSpace.driftDash.brake = vertVelocity;
 		params->sideView.driftDash.brake = vertVelocity * 0.5f;
 		params->boss.driftDash.brake = vertVelocity * 0.5f;
 		return originalStep_DriftDash(self, ctx, deltaTime);
@@ -476,7 +491,7 @@ HOOK(bool, __fastcall, Step_Diving, 0x1406AD600, app::player::StateDiving* self,
 			return originalStep_Diving(self, ctx, deltaTime);
 		}
 		if (divingIdleTimer > 2.0f && divingIdleStatus) {
-			ctx->playerObject->GetComponent<hh::anim::GOCAnimator>()->ChangeState("DIVE");
+			ctx->playerObject->GetComponent<hh::anim::GOCAnimator>()->ChangeState("SPIN");
 			divingIdleStatus = false;
 			divingIdleTimer = 0.0f;
 			return originalStep_Diving(self, ctx, deltaTime);
@@ -581,7 +596,7 @@ HOOK(void, __fastcall, Leave_StompingDown, 0x14A85DF40, app::player::StateStompi
 	if (nextState != 11 || nextState != 63 || nextState != 9 || nextState != 10 || nextState != 24) {
 		ctx->StopEffects();
 	}
-	originalLeave_StompingDown(self, ctx, nextState);
+	return originalLeave_StompingDown(self, ctx, nextState);
 }
 
 HOOK(void, __fastcall, Enter_StompingLand, 0x1406D0430, app::player::StateStompingLand* self, app::player::PlayerHsmContext* ctx, int previousState) {
@@ -589,8 +604,8 @@ HOOK(void, __fastcall, Enter_StompingLand, 0x1406D0430, app::player::StateStompi
 	originalEnter_StompingLand(self, ctx, previousState);
 	if (ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[7].state & 256 && WantToBounce) {	
 		ctx->gocPlayerHsm->hsm.ChangeState(11);
-		return;
 	}
+	return;
 }
 
 HOOK(bool, __fastcall, Step_StompingLand, 0x1406d1d30, app::player::StateStompingLand* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
@@ -616,11 +631,11 @@ HOOK(bool, __fastcall, ProcessMsg_GrindDoubleJump, 0x1406BE330, app::player::Sta
 		ctx->gocPlayerHsm->ChangeState(11, 0);
 		return 1;
 	}
-	if (message->ID == hh::fnd::MessageID::EightThreeThreeSix) {
-		ctx->gocPlayerHsm->ChangeState(28, 0); // evil way, wanted to patch stateID, but it didn't work, blep
-		ctx->gocPlayerHsm->ChangeState(30, 0);
-		return 1;
-	}
+	//if (message->ID == hh::fnd::MessageID::EightThreeThreeSix) {
+	//	ctx->gocPlayerHsm->ChangeState(30, 0); // evil way, wanted to patch stateID, but it didn't work, blep
+	//	//ctx->gocPlayerHsm->ChangeState(30, 0);
+	//	return 1;
+	//}
 	else {
 		return originalProcessMsg_GrindDoubleJump(self, ctx, message);
 	}
@@ -663,7 +678,7 @@ HOOK(bool, __fastcall, Step_BounceJump, 0x1406C1C80, app::player::StateBounceJum
 	csl::math::Vector2 currInput = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->leftStickInput.value();
 	float speed = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->Speed.value();
 	float speed2 = ctx->gocPlayerKinematicParams->velocity.norm();
-	if (speed > 80.0f || speed2 > 85.0f) {
+	if ((speed > 80.0f || speed2 > 85.0f) && bounceEnterId== 107 ){
 		ctx->blackboardStatus->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 1);
 	}
 	if (!WantToBounce) {
@@ -697,6 +712,7 @@ HOOK(void, __fastcall, Enter_Jump, 0x1406C0AB0, app::player::StateJump* self, ap
 	float speed = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->Speed.value();
 	jumpTimer = 0.0f;
 	jumpStatus = false;
+	jumpAnimStatus = false;
 	// can someone 
 	if (speed < 17) {
 		WriteProtected<byte>(0x1406c0d3c, 0x20); // JUMP_UP
@@ -709,35 +725,99 @@ HOOK(void, __fastcall, Enter_Jump, 0x1406C0AB0, app::player::StateJump* self, ap
 		WriteProtected<byte>(0x1406c0d3e, 0xB9);
 	}
 	originalEnter_Jump(self, ctx, previousState);
+	return;
 }
 
 HOOK(bool, __fastcall, Step_Jump, 0x14a7c1140, app::player::StateJump* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	bool crossHold = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[0].state & 256;
-	float preActionTime = ctx->playerObject->GetComponent<app::player::GOCPlayerParameter>()->GetJumpParameters().preActionTime;
-	jumpTimer += deltaTime;
-	if (!crossHold && !jumpStatus) {
-		// nullify vertical speed pre-Frontiers style
-		csl::math::Vector4 velocity = ctx->gocPlayerKinematicParams->velocity;
-		ctx->gocPlayerKinematicParams->velocity = csl::math::Vector4(velocity.x(), 0, velocity.z(), 0); 
-		if (jumpTimer > preActionTime) {
-			ctx->ChangeState("SPIN");
-			ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationState("JUMP_BALL", 0xFE);
-			ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(1, 1);
-		}
-		jumpStatus = true;
-		return originalStep_Jump(self, ctx, deltaTime);
+	bool crossTap = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[0].state & 512;
+	bool boost = ctx->blackboardStatus->GetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST);
+	float altitude = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->altitude.value();
+	jumpTimer += deltaTime;	
+	if (!jumpAnimStatus) {
+		ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardBattle>()->SetFlag020(1);
 	}
-	if (jumpTimer > preActionTime && !jumpStatus) {
-		jumpStatus = true;
-		ctx->ChangeState("SPIN");
-		ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationState("JUMP_BALL", 0xFE);
+	if (boost) {
+		ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardBattle>()->SetFlag020(1);
 		ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(1, 1);
-		bool res = originalStep_Jump(self, ctx, deltaTime);
-		return res;
 	}
-	else {
+	//if (!jumpAnimStatus && jumpTimer >= 0.125f) {
+	//	ctx->ChangeState("SPINJUMP");
+	//	ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationState("SPINJUMP", 0xFE);
+	//	ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(1, 1);
+	//	jumpAnimStatus = true;
+	//}
+	if (jumpStatus) {
 		return originalStep_Jump(self, ctx, deltaTime);
 	}
+	if (crossTap) {
+		ctx->gocPlayerHsm->ChangeState(11, 0);
+		return 1;
+	}
+	if (!crossHold) {
+		if (altitude < 0.25f && !jumpStatus) {
+			return originalStep_Jump(self, ctx, deltaTime);
+		}
+		float speed = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->Speed.value();
+		if (speed > 45 && !jumpAnimStatus) {
+			//ctx->ChangeState("SPINJUMP");
+			//ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationState("QUICK_TURN", 0xFE);
+			ctx->playerObject->GetComponent<hh::anim::GOCAnimator>()->ChangeState("QUICK_TURN");
+			ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(1, 1);
+			jumpAnimStatus = true;
+		}
+		if (jumpTimer >= 0.085f && !jumpAnimStatus) {
+			ctx->ChangeState("SPINJUMP");
+			ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationState("SPINJUMP", 0xFE);
+			ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(1, 1);
+			jumpAnimStatus = true;
+		}
+		if (altitude > 0.25f && !jumpStatus) {
+			csl::math::Vector4 velocity = ctx->gocPlayerKinematicParams->velocity;
+			ctx->gocPlayerKinematicParams->velocity = csl::math::Vector4(velocity.x(), 5.0f, velocity.z(), 0);
+			jumpStatus = true;
+		}
+		return originalStep_Jump(self, ctx, deltaTime);
+	}
+	if (jumpTimer >= 0.125f && !jumpAnimStatus) {
+		jumpStatus = true;
+		ctx->ChangeState("SPINJUMP");
+		ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationState("SPINJUMP", 0xFE);
+		ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(1, 1);
+		jumpAnimStatus = true;
+		return originalStep_Jump(self, ctx, deltaTime);
+	}
+	return originalStep_Jump(self, ctx, deltaTime);
+	//float preActionTime = ctx->playerObject->GetComponent<app::player::GOCPlayerParameter>()->GetJumpParameters().preActionTime;
+	//if (!crossHold && !jumpStatus) {
+	//	if (altitude < 0.25f && jumpTimer < 1.0f) {
+	//		return originalStep_Jump(self, ctx, deltaTime);
+	//	}
+	//	if (altitude > 0.25f && jumpTimer < 0.075f) {
+	//		// nullify vertical speed pre-Frontiers style
+	//		csl::math::Vector4 velocity = ctx->gocPlayerKinematicParams->velocity;
+	//		ctx->gocPlayerKinematicParams->velocity = csl::math::Vector4(velocity.x(), 5.0f, velocity.z(), 0);
+	//		jumpStatus = true;
+	//		return originalStep_Jump(self, ctx, deltaTime);
+	//	}
+	//	if (jumpTimer >= 0.75f) {
+	//		ctx->ChangeState("SPINJUMP");
+	//		ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationState("SPINJUMP", 0xFE);
+	//		ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(1, 1);
+	//		jumpStatus = true;
+	//	}
+	//	return originalStep_Jump(self, ctx, deltaTime);
+	//}
+	//if (jumpTimer >= preActionTime && !jumpStatus) {
+	//	jumpStatus = true;
+	//	ctx->ChangeState("SPINJUMP");
+	//	ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationState("SPINJUMP", 0xFE);
+	//	ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(1, 1);
+	//	return originalStep_Jump(self, ctx, deltaTime);
+	//}
+	//else {
+	//	return originalStep_Jump(self, ctx, deltaTime);
+	//}
 }
 
 HOOK(bool, __fastcall, Step_AirBoost, 0x14A670E80, app::player::StateAirBoost* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
@@ -776,6 +856,25 @@ HOOK(void, __fastcall, Enter_LightDash, 0x1406c2f80, app::player::StateLightDash
 	return;
 }
 
+HOOK(bool, __fastcall, Step_WallJump, 0x1406E0BC0, app::player::StateWallJump* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+	wallJumpTimer += deltaTime;
+	if (wallJumpTimer > 3.5f) {
+		ctx->gocPlayerHsm->ChangeState(15, 0);
+		return 1;
+	}
+	if (ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[0].state & 512 && wallJumpTimer >= 0.25f) {
+		ctx->gocPlayerHsm->ChangeState(10, 0);
+		return 1;
+	}
+	if (ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[3].state & 512) {
+		ctx->gocPlayerHsm->ChangeState(24, 0);
+		return 1;
+	}
+	else {
+		return originalStep_WallJump(self, ctx, deltaTime);
+	}
+}
+
 BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID reserved)
 {
 	switch (reason)
@@ -783,6 +882,7 @@ BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID res
 	case DLL_PROCESS_ATTACH:
 		patch_Step_StateWallJump();
 		patch_Step_StateJump();
+		patch_Leave_StateWallJump();
 		patch_Leave_StateLightDash();
 		INSTALL_HOOK(InitPlayer);
 
@@ -808,6 +908,8 @@ BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID res
 		INSTALL_HOOK(Step_AirBoost);
 		INSTALL_HOOK(Enter_Run);
 		INSTALL_HOOK(Enter_LightDash);
+		INSTALL_HOOK(Step_WallJump);
+		
 		break;
 	case DLL_PROCESS_DETACH:
 	case DLL_THREAD_ATTACH:
