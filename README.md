@@ -1,6 +1,6 @@
 # shadow-moveset
 
-dummy. TBD
+dummy. TBD шкибиди допдопдоп ес ес
 
 ## Setting up the development environment
 
@@ -15,8 +15,8 @@ Check out the project and make sure to also check out its submodules:
 ```sh
 git clone --recurse-submodules https://github.com/stis1/shadow-moveset.git
 ```
-
-Now let CMake do its thing:
+Open command line in your cloned repository directory
+And let CMake do its thing:
 
 ```sh
 cmake -A x64 -B build
@@ -26,7 +26,7 @@ If you have Shadow Generations installed in a non-standard location, you can spe
 with the `GAME_FOLDER` variable:
 
 ```sh
-cmake -A x64 -B build -DGAME_FOLDER="C:\ShadowFrontiers"
+cmake -A x64 -B build -DGAME_FOLDER="C:\SilverGame"
 ```
 
 Once CMake is finished, navigate to the build directory and open `shadow-moveset.sln` with Visual Studio.
