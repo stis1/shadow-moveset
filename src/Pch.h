@@ -12,6 +12,12 @@
 
 #include <cstdint>
 #include <miller-sdk.h>
-
+#include <ini.h>
 #include <utilities/Helpers.h>
+#include <iostream>
+#include <optional>
+///////////////////////////////////////
 #include <rfl_idiotism.h>
+#include <Patches.h>
+#include <Variables.h>
+///////////////////////////////////////

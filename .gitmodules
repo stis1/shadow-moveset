@@ -6,4 +6,7 @@
 	url = https://github.com/microsoft/Detours.git
 [submodule "miller-sdk"]
 	path = miller-sdk
-	url = https://github.com/stis1/miller-sdk.git
+	url = ../miller-sdk
+[submodule "vendor/mINI/mINI"]
+	path = vendor/mINI/mINI
+	url = https://github.com/metayeti/mINI.git

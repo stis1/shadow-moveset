@@ -10,6 +10,23 @@ constexpr double DEG2RAD = 0.01745329238474369;
 #define offsetof(s, m) ((size_t)&(((s*)0)->m))
 #endif
 
+template<typename T>
+void WriteProtected(uintptr_t address, T value) {
+    DWORD oldProtect;
+    VirtualProtect(reinterpret_cast<void*>(address), sizeof(T), PAGE_EXECUTE_READWRITE, &oldProtect);
+    *reinterpret_cast<T*>(address) = value;
+    VirtualProtect(reinterpret_cast<void*>(address), sizeof(T), oldProtect, &oldProtect);
+}
+
+inline csl::math::Vector3 ConvertTo3(const csl::math::Vector4& vector4) {
+    return vector4.template head<3>();
+}
+
+#define NOTIFY(str, ...) \
+	SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_GREEN | FOREGROUND_INTENSITY); \
+    std::cout << "[Shadow Moveset]: " << str << std::endl; \
+    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
+
 #define EXPORT extern "C" __declspec(dllexport)
 
 #define PRINT_BOOLEAN(a) printf(#a " = %s\n", a ? "TRUE" : "FALSE")

@@ -59,7 +59,7 @@ set_target_properties(mod
         VS_DEBUGGER_WORKING_DIRECTORY ${GAME_FOLDER_NORMALIZED}
 )
 
-target_link_libraries(mod PRIVATE miller-sdk detours)
+target_link_libraries(mod PRIVATE miller-sdk detours mINI)
 
 add_subdirectory(src)
 configure_file(mod.ini.in mod.ini)

@@ -1,36 +1,24 @@
-#define NOTIFY(str, ...) \
-	SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_GREEN | FOREGROUND_INTENSITY); \
-    std::cout << "[Shadow Moveset]: " << str << std::endl; \
-    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
-#include <iostream>
-#include <optional>
-#include <fstream>
-
-inline csl::math::Vector3 ConvertTo3(const csl::math::Vector4 &vector4) {
-	return vector4.template head<3>();
-}
-
-static csl::math::Vector4 prevVelocity{}; // someone kill me please
-static csl::math::Vector3 jumpEnterNormal{};
-static bool WantToBounce{};
-static bool wasI{};
-static bool rolling{};
-static csl::math::Vector2 stompInput{};
-static csl::math::Vector2 bounceEnterInput{};
-static int bounceEnterId{};
-static int stompDownEnterId{};
-
-static float divingIdleTimer{};
-static bool divingIdleStatus{};
-
-// jump
-static float jumpTimer{};
-static bool jumpStatus{};
-static bool jumpAnim{};
-static bool isShortHop{};
-
-static float wallJumpTimer{};
-// i want kms because of these timers
+//////////////////////////////////////////////////////////////////////////////
+csl::math::Vector4 prevVelocity{};
+csl::math::Vector3 jumpEnterNormal{};
+bool WantToBounce{};
+bool wasI{};
+bool rolling{};
+csl::math::Vector2 stompInput{};
+csl::math::Vector2 bounceEnterInput{};
+int bounceEnterId{};
+int stompDownEnterId{};
+///////////////////////////////////////
+float divingIdleTimer{};
+bool divingIdleStatus{};
+///////////////////////////////////////
+float jumpTimer{};
+bool jumpStatus{};
+bool jumpAnim{};
+bool isShortHop{};
+///////////////////////////////////////
+float wallJumpTimer{};
+//////////////////////////////////////////////////////////////////////////////
 
 float deadZone (0.045f); // deadzone of 15% on both X and Y axis, magnitude of vector2(0.15,0.15)
 
@@ -48,52 +36,37 @@ enum State
 	falls,
 };
 
-template<typename T>
-void WriteProtected(uintptr_t address, T value) {
-	DWORD oldProtect;
-	VirtualProtect(reinterpret_cast<void*>(address), sizeof(T), PAGE_EXECUTE_READWRITE, &oldProtect);
-	*reinterpret_cast<T*>(address) = value;
-	VirtualProtect(reinterpret_cast<void*>(address), sizeof(T), oldProtect, &oldProtect);
+enum Hedgehog {
+	Sonic,
+	Shadow
+};
+
+static Hedgehog player{};
+
+void SetHedgehog() {
+	mINI::INIFile file("hedgehog.ini");
+	mINI::INIStructure ini;
+	if (!file.read(ini)) {
+		FatalExit(-1);
+	}
+	auto& hedgehog = ini["Hedgehog"];
+	bool option = hedgehog["Sonic"] == "1";
+	if (option) {
+		player = Sonic;
+	}
+	else {
+		player = Shadow;
+	}
 }
 
-void Leave_LightDash(app::player::StateLightDash* self, app::player::PlayerHsmContext* ctx, int nextState);
-
-void Leave_WallJump(app::player::StateWallJump* self, app::player::PlayerHsmContext* ctx, int nextState);
-
-void patch_Step_StateWallJump() {
-	// replacing jz with jnz iirc to avoid StateWallJump transiting into StateFall for some reason
-	WriteProtected<byte>(0x01406e0bd6, 0x75);
+inline void пидарас(app::player::PlayerHsmContext* ctx) {
+	if (ctx->blackboardStatus->GetCombatFlag(app::player::BlackboardStatus::CombatFlag::DOUBLE_JUMP)) {
+		ctx->gocPlayerHsm->ChangeState(10, 100);
+	}
+	else {
+		ctx->gocPlayerHsm->ChangeState(13, 100);
+	}
 }
-
-void patch_Step_StateJump() {
-	// replacing jbe that'd transit statejump into ball animation, with doing nothing, behavior overriden in hook
-	WriteProtected<byte>(0x14A7C123A, 0xE9); // jmp
-	WriteProtected<byte>(0x14A7C123B, 0x43); // where
-	WriteProtected<byte>(0x14A7C123C, 0x01);
-	WriteProtected<byte>(0x14A7C123D, 0x00);
-	WriteProtected<byte>(0x14A7C123E, 0x00);
-	WriteProtected<byte>(0x14A7C123F, 0x90); // nop
-}
-
-void patch_Leave_StateWallJump() {
-	WriteProtected<void*>(0x1412631A0, &Leave_WallJump);
-}
-
-void patch_Leave_StateLightDash() {
-	WriteProtected<void*>(0x14125BED8, &Leave_LightDash);
-}
-
-void Leave_WallJump(app::player::StateWallJump* self, app::player::PlayerHsmContext* ctx, int nextState) {
-	wallJumpTimer = 0.0f;
-	return;
-}
-
-void Leave_LightDash(app::player::StateLightDash* self, app::player::PlayerHsmContext* ctx, int nextState) {
-	// Thank You Ash and Zor
-	ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardBattle>()->SetFlag020(1);
-	ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(2, 0);
-	return;
-} 
 
 void damageControl(app::player::PlayerHsmContext* ctx, bool leaveMeAlone) {
 	auto* pPluginCollision = ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>();
@@ -190,7 +163,7 @@ void Redirect(app::player::PlayerHsmContext* ctx, State to_what)
 			if (playerInfo->currentBoostGauge > 0.0f) {
 				pGOCPlayerHsm->ChangeState(4, 0);
 				plugin->Boost();
-				damageControl(ctx, 0);
+				ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(2, 1);
 			}
 #if _DEBUG
 			NOTIFY("DIRECTED TO BOOST");
@@ -233,11 +206,15 @@ void Redirect(app::player::PlayerHsmContext* ctx, State to_what)
 	return;
 }
 
-void driftdash_inputs(app::player::PlayerHsmContext* ctx) {
-	bool isGrounded = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->isGrounded.value();
+bool driftdash_inputs(app::player::PlayerHsmContext* ctx) {
+	app::level::PlayerInformation* playerInfo = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation;
+	bool isGrounded = playerInfo->isGrounded.value();
+	
+	auto* plugin = ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginBoost>();
+	
 	if (!isGrounded) {
 		Redirect(ctx, bouncejump);
-		return;
+		return 1;
 	}
 	// player input
 	auto* pGOCInput = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent();
@@ -247,11 +224,11 @@ void driftdash_inputs(app::player::PlayerHsmContext* ctx) {
 
 	if (circleTap) {
 		Redirect(ctx, run);
-		return;
+		return 1;
 	}
 	if (crossTap) {
-		Redirect(ctx, jump);
-		return;
+		ctx->gocPlayerHsm->ChangeState(9, 0);
+		return 1;
 	}
 	bool boostHeld = pGOCInput->actionMonitors[3].state & 256;
 	bool boostTap = pGOCInput->actionMonitors[3].state & 512;
@@ -260,42 +237,61 @@ void driftdash_inputs(app::player::PlayerHsmContext* ctx) {
 		ctx->blackboardStatus->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 0);
 		if (boostTap) 
 		{
-			Redirect(ctx, boost);
-			return;
+			if (playerInfo->currentBoostGauge > 0.0f) {
+				ctx->gocPlayerHsm->ChangeState(4, 0);
+				ctx->blackboardStatus->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 1);
+				ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardBattle>()->SetFlag020(0);
+				ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(2, 1);
+				plugin->Boost();
+				return 1;
+			}
+			else {
+				return 0;
+			}
 		}
 	}
 	else // i am not using one func to delegate this, because if boostHeld is not there, then game has higher % crashes 
 	{
 		if (boostTap || boostHeld) 
 		{
-			Redirect(ctx, boost);
-			return;
+			if (playerInfo->currentBoostGauge > 0.0f) {
+				ctx->gocPlayerHsm->ChangeState(4, 0);
+				ctx->blackboardStatus->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 1);
+				ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardBattle>()->SetFlag020(0);
+				ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(2, 1);
+				plugin->Boost();
+				return 1;
+			}
+			else {
+				return 0;
+			}
 		}
 	}
 
-	return;
+	return 0;
 }
 
-void bouncejump_inputs(app::player::PlayerHsmContext* ctx) {
-	if (ctx->DoHoming(0)) {
-		return;
-	}
-	
+bool bouncejump_inputs(app::player::PlayerHsmContext* ctx) {
+	/*if (ctx->DoHoming(0)) {
+		return 1;
+	}*/
+	ctx->DoHoming(0);
 	auto* pGOCInput = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent();
 	float Speed = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->Speed.value();
 	
 	if (pGOCInput->actionMonitors[7].state & 512 && rolling) {
-		ctx->gocPlayerHsm->ChangeState(4, 0);
-		return;
+		ctx->gocPlayerHsm->ChangeState(4, 100);
+		return 1;
 	}
 	if (pGOCInput->actionMonitors[0].state & 512) {
-		ctx->gocPlayerHsm->ChangeState(10, 0);
-		return;
+		пидарас(ctx);
+		return 1;
 	}
 	if (pGOCInput->actionMonitors[7].state & 512) {
-		ctx->gocPlayerHsm->ChangeState(52, 0);
-		return;
+		ctx->gocPlayerHsm->ChangeState(52, 100);
+		return 1;
 	}
+	return 0;
 	//if (inputcomp->actionMonitors[7].state & 256 && Timer > 0.15f) {
 	//	Redirect(ctx, StateDirector::bouncejump);
 	//}
@@ -308,7 +304,7 @@ void drop_driftdash_transition(app::player::PlayerHsmContext* ctx, float deltaTi
 
 	if (DDash_Timer < 0.15f && getID != 111) {
 		DDash_Timer += deltaTime;
-		ctx->gocPlayerHsm->ChangeState(109, 0);
+		ctx->gocPlayerHsm->ChangeState(109, 100);
 		#if _DEBUG
 		NOTIFY("put to drop for")
 		#endif
@@ -327,16 +323,15 @@ void drop_driftdash_transition(app::player::PlayerHsmContext* ctx, float deltaTi
 }
 
 void pizdecSuperBiker3D(app::player::PlayerHsmContext* ctx, float deltaTime) {
+	const float bounceBreakForce = 20.0f;
 	float prevX = prevVelocity.x();
 	float prevZ = prevVelocity.z();
+	float Y = ctx->gocPlayerKinematicParams->velocity.y();
+	
+	csl::math::Vector4 horVector(prevX, Y, prevZ, 0);
 	if (prevX == 0 && prevZ == 0) {
 		return; // discarded samples, return immediately;
 	}
-
-	float Y = ctx->gocPlayerKinematicParams->velocity.y();
-	const float bounceBreakForce = 20.0f;
-
-	csl::math::Vector4 horVector(prevX, Y, prevZ, 0);
 	#if _DEBUG
 	std::cout << "PrevX infunc is " << prevX << std::endl;
 	std::cout << "PrevZ infunc is " << prevZ << std::endl;
@@ -368,7 +363,7 @@ void Bouncinggg(std::string arg, float Multiplier, bool directionChanged) {
 	}
 	if (arg == "apply") {
 		SampleSpeed = SampleSpeed * Multiplier;
-		pParams->whiteSpace.jumpSpeed.limitUpSpeed = SampleSpeed;
+		pParams->whiteSpace.jumpSpeed.limitUpSpeed= SampleSpeed;
 		pParams->forwardView.jumpSpeed.limitUpSpeed = SampleSpeed;
 		pParams->sideView.jumpSpeed.limitUpSpeed = SampleSpeed;
 		pParams->boss.jumpSpeed.limitUpSpeed = SampleSpeed;
@@ -404,13 +399,13 @@ void Bouncinggg(std::string arg, float Multiplier, bool directionChanged) {
 
 HOOK(void, __fastcall, InitPlayer, 0x14060DBC0, hh::game::GameObject* self) {
 	originalInitPlayer(self);
-	
+
 	//self->GetComponent<app::player::GOCPlayerBlackboard>()->blackboard->GetContent<app::player::BlackboardStatus>()->SetCombatFlag(app::player::BlackboardStatus::CombatFlag::SLALOM_STEP,1);
 	//rfl_idiotism::player_common_tweak();
 	rfl_idiotism::jump_speed_func("backup");
 	rfl_idiotism::bounceRFL("backup");
 	auto dword28 = self->GetComponent<app::player::GOCPlayerBlackboard>()->blackboard->GetContent<app::player::BlackboardStatus>()->dword28;
-	std::cout << "DWORD28, probably skin id: " << dword28 << std::endl;
+	std::cout << "DWORD28, probably skin id: " << dword28 << std::endl; // 3 if movie Shadow
 	// reset
 	prevVelocity = csl::math::Vector4(0,0,0,0);
 	jumpEnterNormal = csl::math::Vector3(0, 0, 0);
@@ -428,11 +423,18 @@ HOOK(void, __fastcall, InitPlayer, 0x14060DBC0, hh::game::GameObject* self) {
 	jumpAnim = 0;
 	wallJumpTimer = 0;
 
-
 	return;
 }
 
 HOOK(void, __fastcall, Enter_Sliding, 0x1406CBB70, app::player::StateSliding* self, app::player::PlayerHsmContext* ctx, int previousState) {
+	//app::level::PlayerInformation* playerInfo = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation;
+	//csl::math::Vector2 leftStick = playerInfo->leftStickInput.value();
+	//float speed = playerInfo->Speed.value();
+	///*bool circleDown = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[7].state & 256;*/
+	//if (speed > 17 && std::fabs(leftStick.x()) > 0.4f && std::fabs(leftStick.y() < 0.8f)) {
+	//	ctx->gocPlayerHsm->hsm.ChangeState(106, 0);
+	//	return;
+	//}	
 	if (previousState == 20) {
 		ctx->gocPlayerHsm->hsm.ChangeState(111, 0);
 		#if _DEBUG
@@ -472,7 +474,9 @@ HOOK(bool, __fastcall, Step_DriftDash, 0x1406AFB70, app::player::StateDriftDash*
 	//	return 1;
 	//}
 	damageControl(ctx, false);
-	driftdash_inputs(ctx);
+	if (driftdash_inputs(ctx)) {
+		return 1;
+	}
 	app::player::PlayerParameters* params = hh::fnd::ResourceManager::GetInstance()->GetResource<hh::fnd::ResReflectionT<app::player::PlayerParameters>>("player_common")->GetData();
 	float vertVelocity = ctx->gocPlayerKinematicParams->velocity.y();
 	float speed = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->Speed.value();
@@ -481,11 +485,20 @@ HOOK(bool, __fastcall, Step_DriftDash, 0x1406AFB70, app::player::StateDriftDash*
 		ctx->blackboardStatus->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 1);
 	}
 	if (vertVelocity < -1.0f) {
-		params->forwardView.driftDash.brake = vertVelocity * 0.5f;
-		params->whiteSpace.driftDash.brake = vertVelocity;
-		params->sideView.driftDash.brake = vertVelocity * 0.5f;
-		params->boss.driftDash.brake = vertVelocity * 0.5f;
-		return originalStep_DriftDash(self, ctx, deltaTime);
+		if (speed > 90) {
+			params->forwardView.driftDash.brake = 3.0f;
+			params->whiteSpace.driftDash.brake = 3.0f;
+			params->sideView.driftDash.brake = 3.0f;
+			params->boss.driftDash.brake = 3.0f;
+			return originalStep_DriftDash(self, ctx, deltaTime);
+		}
+		else {
+			params->forwardView.driftDash.brake = vertVelocity * 0.5f;
+			params->whiteSpace.driftDash.brake = vertVelocity;
+			params->sideView.driftDash.brake = vertVelocity * 0.5f;
+			params->boss.driftDash.brake = vertVelocity * 0.5f;
+			return originalStep_DriftDash(self, ctx, deltaTime);
+		}
 	}
 	if (vertVelocity > -1.0f && vertVelocity < 8.0f) {
 		params->forwardView.driftDash.brake = 3.0f;
@@ -499,6 +512,9 @@ HOOK(bool, __fastcall, Step_DriftDash, 0x1406AFB70, app::player::StateDriftDash*
 		params->whiteSpace.driftDash.brake = vertVelocity * 0.5f;
 		params->sideView.driftDash.brake = vertVelocity * 0.5f;
 		params->boss.driftDash.brake = vertVelocity * 0.5f;
+		return originalStep_DriftDash(self, ctx, deltaTime);
+	}
+	else {
 		return originalStep_DriftDash(self, ctx, deltaTime);
 	}
 }
@@ -574,7 +590,7 @@ HOOK(bool, __fastcall, Step_StompingDown, 0x1406d1760, app::player::StateStompin
 	
 	if (crossTap) {
 		ctx->gocPlayerHsm->ChangeState(10, 0);
-		return 0;
+		return 1;
 	}
 	csl::math::Vector2 currInput = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->leftStickInput.value();
 	bool circleHold = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[7].state & 256;
@@ -648,11 +664,12 @@ HOOK(bool, __fastcall, Step_StompingLand, 0x1406d1d30, app::player::StateStompin
 	if (pGOCInput->actionMonitors[7].state & 256 && WantToBounce) {
 		originalStep_StompingLand(self, ctx, deltaTime);
 		ctx->gocPlayerHsm->hsm.ChangeState(11);
+		return 1;
 	}
 	else {
 		originalStep_StompingLand(self, ctx, deltaTime);
 	}
-	return 1;
+	return 0;
 }
 
 HOOK(bool, __fastcall, Step_GrindDoubleJump, 0x1406BEAB0, app::player::StateGrindDoubleJump* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
@@ -717,10 +734,11 @@ HOOK(void, __fastcall, Enter_BounceJump, 0x1406C06E0, app::player::StateBounceJu
 }
 
 HOOK(bool, __fastcall, Step_BounceJump, 0x1406C1C80, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+	bouncejump_inputs(ctx);
 	csl::math::Vector2 currInput = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->leftStickInput.value();
-	float speed = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->Speed.value();
-	float speed2 = ctx->gocPlayerKinematicParams->velocity.norm();
-	if ((speed > 80.0f || speed2 > 85.0f) && bounceEnterId == 107 ){
+	float horVelocity = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->Speed.value();
+	float totalVelocity = ctx->gocPlayerKinematicParams->velocity.norm();
+	if ((horVelocity > 80.0f || totalVelocity > 85.0f) && bounceEnterId == 107 ){
 		ctx->blackboardStatus->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 1);
 	}
 	else {
@@ -729,7 +747,7 @@ HOOK(bool, __fastcall, Step_BounceJump, 0x1406C1C80, app::player::StateBounceJum
 	if (!WantToBounce) {
 		rfl_idiotism::jump_speed_func("apply");
 	}
-	/*if (bounceEnterId == 55)
+	if (bounceEnterId == 55)
 	{
 		float mult = currInput.norm() / bounceEnterInput.norm();
 		if (mult >= 0.05 && currInput.norm() < bounceEnterInput.norm()) {
@@ -738,12 +756,10 @@ HOOK(bool, __fastcall, Step_BounceJump, 0x1406C1C80, app::player::StateBounceJum
 		if (mult < 0.05) {
 			rfl_idiotism::jump_speed_func("apply");
 		}
-	}*/
-	bouncejump_inputs(ctx);
-	bool res = originalStep_BounceJump(self, ctx, deltaTime);
+	}
 	damageControl(ctx, 0);
 
-	return res;
+	return originalStep_BounceJump(self,ctx,deltaTime);
 }
 
 HOOK(void, __fastcall, Leave_BounceJump, 0x1406C15F0, app::player::StateBounceJump* self, app::player::PlayerHsmContext* ctx, int nextState) {
@@ -757,21 +773,24 @@ HOOK(void, __fastcall, Enter_Jump, 0x1406C0AB0, app::player::StateJump* self, ap
 	app::level::PlayerInformation* playerInfo = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation;
 	float speed = playerInfo->Speed.value();
 	jumpEnterNormal = playerInfo->groundNormal.value();
-	static bool jumpStartLR{};
+	//static bool jumpStartLR{};
 	jumpTimer = 0.0f;
 	jumpStatus = false;
 	jumpAnim = false;
 	// can someone 
 	if (speed < 17) {
-		WriteProtected<byte>(0x1406c0d3c, 0x20); // JUMP_UP
-		WriteProtected<byte>(0x1406c0d3d, 0x06);
-		WriteProtected<byte>(0x1406c0d3e, 0xBA);
+		WriteProtected<DWORD>(0x1406c0d3c, 0x00BA0620); // JUMP_UP (low speed)
+		//WriteProtected<byte>(0x1406c0d3c, 0x20);
+		//WriteProtected<byte>(0x1406c0d3d, 0x06);
+		//WriteProtected<byte>(0x1406c0d3e, 0xBA);
 	}
 	else {
-		WriteProtected<byte>(0x1406c0d3c, 0xB0); // JUMP_START
-		WriteProtected<byte>(0x1406c0d3d, 0x5C);
-		WriteProtected<byte>(0x1406c0d3e, 0xB9);
+		WriteProtected<DWORD>(0x1406c0d3c, 0x00B95CB0); // JUMP_START (high speed)
+		//WriteProtected<byte>(0x1406c0d3c, 0xB0);
+		//WriteProtected<byte>(0x1406c0d3d, 0x5C);
+		//WriteProtected<byte>(0x1406c0d3e, 0xB9);
 	}
+	ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationVariableFloat("SPEED_RATIO", 0.45f);
 	originalEnter_Jump(self, ctx, previousState);
 	return;
 }
@@ -790,10 +809,11 @@ HOOK(bool, __fastcall, Step_Jump, 0x14a7c1140, app::player::StateJump* self, app
 	bool crossHold = inputComp->actionMonitors[0].state & 256;
 	bool crossTap = inputComp->actionMonitors[0].state & 512;
 
+
 	jumpTimer += deltaTime;
 	if (crossTap)
 	{
-		ctx->gocPlayerHsm->ChangeState(10, 0); // doubleJump
+		пидарас(ctx);
 		return 1;
 	}
 	// player jump decision
@@ -816,13 +836,14 @@ HOOK(bool, __fastcall, Step_Jump, 0x14a7c1140, app::player::StateJump* self, app
 		ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(1, 0); // Shadow doesn't deal damage
 	}
 	if (!jumpAnim && isShortHop && jumpTimer > 0.5f) {
-		ctx->playerObject->GetComponent<hh::anim::GOCAnimator>()->ChangeState("FALL_LOOP");
+		ctx->playerObject->GetComponent<hh::anim::GOCAnimator>()->ChangeState("FALL");
+		*(uint8_t*)((char*)self + 0x40) = 1u;
 		return originalStep_Jump(self, ctx, deltaTime);
 	}
 	//shortHop
 	if (isShortHop)
 	{
-		// high-speed shorthop (maybe there is avoid_f asm state? i'd need it)
+		// high-speed shorthop
 		if (!jumpAnim && speed > boostMin && !dWings && jumpTimer < 0.12f) {
 			ctx->playerObject->GetComponent<hh::anim::GOCAnimator>()->ChangeState("AVOID_FRONT_AIR");
 			jumpAnim = true; // do the thing once
@@ -845,6 +866,7 @@ HOOK(bool, __fastcall, Step_Jump, 0x14a7c1140, app::player::StateJump* self, app
 			ctx->ChangeState("SPINJUMP");
 			ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationState("SPINJUMP", 0xFE);
 			ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(1, 1);
+			*(uint8_t*)((char*)self + 0xF4) = 1u;
 			jumpAnim = true;
 		}
 	}
@@ -852,10 +874,10 @@ HOOK(bool, __fastcall, Step_Jump, 0x14a7c1140, app::player::StateJump* self, app
 }
 
 HOOK(void, __fastcall, Leave_Jump, 0x1406c2b70, app::player::StateJump* self, app::player::PlayerHsmContext* ctx, int nextState) {
-	//jumpTimer = 0.0f;
-	//jumpStatus = false;
-	//jumpAnim = false;
-	//isShortHop = false;
+	jumpTimer = 0.0f;
+	jumpStatus = false;
+	jumpAnim = false;
+	isShortHop = false;
 	originalLeave_Jump(self, ctx, nextState);
 }
 
@@ -878,11 +900,14 @@ HOOK(void, __fastcall, Enter_Run, 0x1406C7000, app::player::StateRun* self, app:
 	#if _DEBUG
 	std::cout << "previous and bounceEnterID: " << previousState << " " << bounceEnterId << std::endl;
 	#endif
+	bool r2Hold = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[3].state & 256;
+	auto* pParams = hh::fnd::ResourceManager::GetInstance()->GetResource<hh::fnd::ResReflectionT<heur::rfl::StandardCameraConfig>>("standard_camera_ws")->GetData();
+	pParams->common.azimuthSensitivity = 10;
 	if (previousState == 11 && bounceEnterId == 107) {
 		ctx->gocPlayerHsm->hsm.ChangeState(107);
 		return;
 	}
-	bool r2Hold = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[3].state & 256;
+	
 	if (previousState == 9 && isShortHop && jumpAnim) {
 		originalEnter_Run(self, ctx, previousState);
 		ctx->playerObject->GetComponent<hh::anim::GOCAnimator>()->ChangeState("SPRING_LANDING"); // hmm
@@ -907,7 +932,7 @@ HOOK(bool, __fastcall, Step_WallJump, 0x1406E0BC0, app::player::StateWallJump* s
 		return 1;
 	}
 	if (ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[0].state & 512 && wallJumpTimer >= 0.25f) {
-		ctx->gocPlayerHsm->ChangeState(10, 0);
+		пидарас(ctx);
 		return 1;
 	}
 	if (ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[3].state & 512) {
@@ -919,15 +944,166 @@ HOOK(bool, __fastcall, Step_WallJump, 0x1406E0BC0, app::player::StateWallJump* s
 	}
 }
 
+HOOK(void, __fastcall, BindMaps, 0x140A2FEC0, hh::game::GameManager* gameManager, hh::hid::InputMapSettings* inputSettings) {
+	inputSettings->BindActionMapping("PlayerLightDash", 0x40004u);
+	originalBindMaps(gameManager, inputSettings);
+}
+
+HOOK(void, __fastcall, bindAction, 0x140c0db60, hh::hid::InputMapSettings* self, const char* action, uint32_t inputID, signed int unk1) {
+	originalbindAction(self ,action, inputID, unk1);
+	printf(action);
+	PRINT_INTEGER(inputID);
+}
+
+inline const char* decideHomingFinishAnim(Hedgehog player ,char counter) {
+	switch (player) 
+	{
+		case Sonic: 
+		{
+			switch (counter) {
+				case 0: return "ATTACK_BOUNCE";
+				case 1: return "JUMP_TRICK_D0";
+				case 2: return "JUMP_TRICK_L0";
+				case 3: return "JUMP_TRICK_R0";
+				case 4: return "JUMP_TRICK_D1";
+				case 5: return "JUMP_TRICK_L1";
+				case 6: return "JUMP_TRICK_R1";
+				case 7: return "JUMP_TRICK_D2";
+				case 8: return "JUMP_TRICK_L2";
+				case 9: return "JUMP_TRICK_R2";
+				default: return "ATTACK_BOUNCE";
+			}
+		}
+		case Shadow: 
+		{
+			switch (counter) {
+			    case 0: return "BUMP_JUMP_START";
+				case 1: return "BUMP_JUMP_RETURN_L";
+				case 2: return "BUMP_JUMP_START";
+				case 3: return "ATTACK_BOUNCE";
+				case 4: return "BUMP_JUMP_RETURN_D";
+				case 5: return "BUMP_JUMP_RETURN_R";
+				case 6: return "BUMP_JUMP_RETURN_U";
+				default: return "ATTACK_BOUNCE";
+			}
+		}
+		default: return "ATTACK_BOUNCE";
+	}
+}
+
+HOOK(void, __fastcall, Enter_HomingFinished, 0x140697820, app::player::StateHomingFinished* self, app::player::PlayerHsmContext* ctx, int previousState) {
+	originalEnter_HomingFinished(self, ctx, previousState);
+	static char counter{};
+	if (previousState == 120 || (previousState - 124 <= 4)) {
+		if (ctx->blackboardStatus->dword28 == 3) {
+			ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationStateWithoutTransition("ATTACK_BOUNCE");
+			*(uint8_t*)((char*)self + 0xE6) = 1;
+			return;
+		} // if movie Shadow
+		switch (player) {
+		case Sonic:
+			ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationVariableFloat("SPEED_RATIO", 0.75f);
+			if (counter == 9) {
+				counter = 0;
+			}
+			break;
+		case Shadow:
+			ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationVariableFloat("SPEED_RATIO", 1.20f);
+			if (counter == 6) {
+				counter = 0;
+			}
+			break;
+		}
+		ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationStateWithoutTransition(decideHomingFinishAnim(player, counter));
+		/*ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationStateWithoutTransition("JUMP_TRICK_D2");*/
+		counter += 1;
+		*(uint8_t*)((char*)self + 0xE6) = 1;
+		return;
+		
+	}
+	else {
+		ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationStateWithoutTransition("ATTACK_BOUNCE");
+	}
+}
+
+HOOK(bool, __fastcall, Step_HomingFinished, 0x1406985B0, app::player::StateHomingFinished* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+	uint8_t flag = *((uint8_t*)self + 229);
+	printf("flag: %u\n", flag);
+	return originalStep_HomingFinished(self, ctx, deltaTime);
+}
+
+HOOK(void, __fastcall, Enter_Drift, 0x1, app::player::StateDrift* self, app::player::PlayerHsmContext* ctx, int previousState) {
+
+}
+
+HOOK(bool, __fastcall, Step_Drift, 0x1406AF920, app::player::StateDrift* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
+	static float timer{};
+	auto* pParams = hh::fnd::ResourceManager::GetInstance()->GetResource<hh::fnd::ResReflectionT<heur::rfl::StandardCameraConfig>>("standard_camera_ws")->GetData();
+	pParams->common.azimuthSensitivity = 500;
+	if (ctx->blackboardStatus->GetWorldFlag(app::player::BlackboardStatus::WorldFlag::OUT_OF_CONTROL)) {
+		ctx->gocPlayerHsm->ChangeState(4, 0);
+		timer = 0;
+		return 1;
+	}
+	
+	app::level::PlayerInformation* playerInfo = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation;
+	float speed = playerInfo->Speed.value();
+	hh::game::InputComponent* inputComp = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent();
+	bool circleDown = inputComp->actionMonitors[7].state & 256;
+	bool r2Hold = inputComp->actionMonitors[3].state & 256;
+	bool r2Tap = inputComp->actionMonitors[3].state & 512;
+	bool crossTap = inputComp->actionMonitors[0].state & 512;
+	
+	if (originalStep_Drift(self, ctx, deltaTime)) {
+		timer = 0;
+		return 1;
+	}
+	if (abs(playerInfo->leftStickInput.value().x()) > 0.075f) {
+		float value = speed / 7.5f;
+		if (value > 5.5f) {
+			value = 5.5f;
+		}
+		ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationVariableFloat("RUN_SPEED", value );
+	}
+	else{
+		ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationVariableFloat("RUN_SPEED", 1);
+	}
+	if (!playerInfo->isGrounded.value()) {
+		ctx->gocPlayerHsm->ChangeState(15, 0);
+		timer = 0;
+		return 1;
+	}
+	if (!circleDown) {
+		ctx->gocPlayerHsm->ChangeState(4, 10);
+		timer = 0;
+		return 1;
+	}
+	if (r2Tap) {
+		/*ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardStatus>()->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 1);*/
+		//ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginBoost>()->Boost();
+	}
+	if (r2Hold) {
+		ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardStatus>()->SetStateFlag(app::player::BlackboardStatus::StateFlag::BOOST, 1);
+	}
+	if (crossTap) {
+		ctx->gocPlayerHsm->ChangeState(9, 0);
+		return 1;
+	}
+}
+
+HOOK(bool, __fastcall, ProcessMsg_Jump, 0x1406C1AD0, app::player::StateJump* self, app::player::PlayerHsmContext* ctx, const hh::fnd::Message* message) {
+	//PRINT_INTEGER(static_cast<uint32_t>(message->ID));
+	return originalProcessMsg_Jump(self, ctx, message);
+}
+
 BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID reserved)
 {
 	switch (reason)
 	{
 	case DLL_PROCESS_ATTACH:
-		patch_Step_StateWallJump();
-		patch_Step_StateJump();
-		patch_Leave_StateWallJump();
-		patch_Leave_StateLightDash();
+		Patches::Patch();
+		SetHedgehog();
+
 		INSTALL_HOOK(InitPlayer);
 
 		INSTALL_HOOK(Enter_Sliding);
@@ -949,11 +1125,18 @@ BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID res
 		INSTALL_HOOK(Leave_BounceJump);
 		INSTALL_HOOK(Enter_Jump);
 		INSTALL_HOOK(Step_Jump);
+		//INSTALL_HOOK(ProcessMsg_Jump);
 		INSTALL_HOOK(Leave_Jump);
 		INSTALL_HOOK(Step_AirBoost);
 		INSTALL_HOOK(Enter_Run);
 		INSTALL_HOOK(Enter_LightDash);
 		INSTALL_HOOK(Step_WallJump);
+		INSTALL_HOOK(BindMaps);
+		INSTALL_HOOK(bindAction);
+		INSTALL_HOOK(Enter_HomingFinished);
+		//INSTALL_HOOK(Step_HomingFinished);
+		INSTALL_HOOK(Step_Drift);
+		
 		break;
 	case DLL_PROCESS_DETACH:
 	case DLL_THREAD_ATTACH:

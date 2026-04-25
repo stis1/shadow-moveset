@@ -122,14 +122,14 @@ void rfl_idiotism::jump_speed_func(std::string arg) {
 			pParams->whiteSpace.jumpSpeed.minStickBrake = WS.minStickBrake;
 			pParams->whiteSpace.jumpSpeed.brake = WS.brake;
 			pParams->whiteSpace.jumpSpeed.accel = WS.accel;
-			pParams->whiteSpace.jumpSpeed.limitUpSpeed = WS.limitUpSpeed;
+			pParams->whiteSpace.jumpSpeed.limitUpSpeed = WS.limitUpSpeed;	
 			pParams->whiteSpace.jumpSpeed.minStickSpeed = WS.StickSpeed;
 			// forwardView
 			pParams->forwardView.jumpSpeed.maxStickBrake = FV.maxStickBrake;
 			pParams->forwardView.jumpSpeed.minStickBrake = FV.minStickBrake;
 			pParams->forwardView.jumpSpeed.brake = FV.brake;
 			pParams->forwardView.jumpSpeed.accel = FV.accel;
-			pParams->forwardView.jumpSpeed.limitUpSpeed = FV.limitUpSpeed;
+			pParams->forwardView.jumpSpeed.limitUpSpeed = FV.limitUpSpeed;	
 			pParams->forwardView.jumpSpeed.minStickSpeed = FV.StickSpeed;
 			// sideView
 			pParams->sideView.jumpSpeed.maxStickBrake = SV.maxStickBrake;
