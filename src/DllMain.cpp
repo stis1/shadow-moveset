@@ -780,15 +780,10 @@ HOOK(void, __fastcall, Enter_Jump, 0x1406C0AB0, app::player::StateJump* self, ap
 	// can someone 
 	if (speed < 17) {
 		WriteProtected<DWORD>(0x1406c0d3c, 0x00BA0620); // JUMP_UP (low speed)
-		//WriteProtected<byte>(0x1406c0d3c, 0x20);
-		//WriteProtected<byte>(0x1406c0d3d, 0x06);
-		//WriteProtected<byte>(0x1406c0d3e, 0xBA);
 	}
 	else {
 		WriteProtected<DWORD>(0x1406c0d3c, 0x00B95CB0); // JUMP_START (high speed)
-		//WriteProtected<byte>(0x1406c0d3c, 0xB0);
-		//WriteProtected<byte>(0x1406c0d3d, 0x5C);
-		//WriteProtected<byte>(0x1406c0d3e, 0xB9);
+
 	}
 	ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationVariableFloat("SPEED_RATIO", 0.45f);
 	originalEnter_Jump(self, ctx, previousState);
