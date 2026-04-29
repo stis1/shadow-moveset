@@ -20,3 +20,5 @@ extern bool jumpAnim;
 extern bool isShortHop;
 
 extern float wallJumpTimer;
+
+extern float homingFinishedTimer;

@@ -17,6 +17,7 @@
 #include <iostream>
 #include <optional>
 ///////////////////////////////////////
+#include <utilities/stisCommon.h>
 #include <rfl_idiotism.h>
 #include <Patches.h>
 #include <Variables.h>
