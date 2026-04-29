@@ -18,6 +18,7 @@ extern float jumpTimer;
 extern bool jumpStatus;
 extern bool jumpAnim;
 extern bool isShortHop;
+extern bool jumpTricked;
 
 extern float wallJumpTimer;
 

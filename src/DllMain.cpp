@@ -17,6 +17,7 @@ float jumpTimer{};
 bool jumpStatus{};
 bool jumpAnim{};
 bool isShortHop{};
+bool jumpTricked{};
 ///////////////////////////////////////
 float wallJumpTimer{};
 //////////////////////////////////////////////////////////////////////////////
@@ -751,6 +752,13 @@ HOOK(void, __fastcall, Enter_Jump, 0x1406C0AB0, app::player::StateJump* self, ap
 	jumpStatus = false;
 	jumpAnim = false;
 	// can someone 
+	if (previousState == 107 && speed > 17) {
+		WriteProtected<DWORD>(0x1406c0d3c, 0x00BA1B58);
+		jumpTricked = true;
+		ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationVariableFloat("SPEED_RATIO", 1.5f);
+		originalEnter_Jump(self, ctx, previousState);
+		return;
+	}
 	if (speed < 17) {
 		WriteProtected<DWORD>(0x1406c0d3c, 0x00BA0620); // JUMP_UP (low speed)
 	}
@@ -781,63 +789,81 @@ HOOK(bool, __fastcall, Step_Jump, 0x14a7c1140, app::player::StateJump* self, app
 	if (crossTap)
 	{
 		пидарас(ctx);
+		jumpTimer = 0.0f;
+		jumpStatus = false;
+		jumpAnim = false;
+		isShortHop = false;
+		jumpTricked = false;
 		return 1;
 	}
+	PRINT_BOOLEAN(jumpTricked);
+	if (!jumpTricked) {
+		// player jump decision
+		if (jumpTimer < 0.12f)
+		{
+			if (!crossHold) {
+				isShortHop = 1;  // tap = short hop
+			}
+			else {
+				isShortHop = 0; // hold = full jump
+			}
+		}
+		if (boost)
+		{
+			ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardBattle>()->SetFlag020(1); // Shadow gets damage (bullets and etc)
+			ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(1, 1); // Shadow deal damage 
+		}
+		if (!boost && isShortHop && jumpAnim) {
+			ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardBattle>()->SetFlag020(1); // Shadow gets damage(bullets and etc)
+			ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(1, 0); // Shadow doesn't deal damage
+		}
+		if (!jumpAnim && isShortHop && jumpTimer > 0.5f) {
+			ctx->playerObject->GetComponent<hh::anim::GOCAnimator>()->ChangeState("FALL");
+			*(uint8_t*)((char*)self + 0x40) = 1u;
+			return originalStep_Jump(self, ctx, deltaTime);
+		}
+		//shortHop
+		if (isShortHop)
+		{
+			// high-speed shorthop
+			if (!jumpAnim && speed > boostMin && !dWings && jumpTimer < 0.12f) {
+				ctx->playerObject->GetComponent<hh::anim::GOCAnimator>()->ChangeState("AVOID_FRONT_AIR");
+				jumpAnim = true; // do the thing once
+			}
+			if (altitude >= 1.25f && !jumpStatus) {
+				csl::math::Vector3 velocity3 = ConvertTo3(ctx->gocPlayerKinematicParams->velocity);
+				jumpEnterNormal.normalize();
+				velocity3 -= jumpEnterNormal * velocity3.dot(jumpEnterNormal);
+				velocity3 += jumpEnterNormal * 2.5f;
+				ctx->gocPlayerKinematicParams->velocity = csl::math::Vector4(velocity3.x(), velocity3.y(), velocity3.z(), 0);
+				jumpStatus = true; // reset it once
+			}
+			return originalStep_Jump(self, ctx, deltaTime);
+		}
+		// fullJump
+		if (!isShortHop)
+		{
+			if (!jumpAnim && !dWings && jumpTimer >= 0.12f) {
+				// We Spin after 0.12 seconds
+				ctx->ChangeState("SPINJUMP");
+				ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationState("SPINJUMP", 0xFE);
+				ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(1, 1);
+				*(uint8_t*)((char*)self + 0xF4) = 1u;
+				jumpAnim = true;
+			}
+		}
+		return originalStep_Jump(self, ctx, deltaTime);
+	}
 	// player jump decision
-	if (jumpTimer < 0.12f)
-	{
-		if (!crossHold) {
-			isShortHop = 1;  // tap = short hop
-		}
-		else {
-			isShortHop = 0; // hold = full jump
-		}
+	bool res = originalStep_Jump(self, ctx, deltaTime);
+	if (res) {
+		jumpTimer = 0.0f;
+		jumpStatus = false;
+		jumpAnim = false;
+		isShortHop = false;
+		jumpTricked = false;
+		return res;
 	}
-	if (boost)
-	{
-		ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardBattle>()->SetFlag020(1); // Shadow gets damage (bullets and etc)
-		ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(1, 1); // Shadow deal damage 
-	}
-	if (!boost && isShortHop && jumpAnim) {
-		ctx->gocPlayerBlackboard->blackboard->GetContent<app::player::BlackboardBattle>()->SetFlag020(1); // Shadow gets damage(bullets and etc)
-		ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(1, 0); // Shadow doesn't deal damage
-	}
-	if (!jumpAnim && isShortHop && jumpTimer > 0.5f) {
-		ctx->playerObject->GetComponent<hh::anim::GOCAnimator>()->ChangeState("FALL");
-		*(uint8_t*)((char*)self + 0x40) = 1u;
-		return originalStep_Jump(self, ctx, deltaTime);
-	}
-	//shortHop
-	if (isShortHop)
-	{
-		// high-speed shorthop
-		if (!jumpAnim && speed > boostMin && !dWings && jumpTimer < 0.12f) {
-			ctx->playerObject->GetComponent<hh::anim::GOCAnimator>()->ChangeState("AVOID_FRONT_AIR");
-			jumpAnim = true; // do the thing once
-		}
-		if (altitude >= 1.25f && !jumpStatus) {
-			csl::math::Vector3 velocity3 = ConvertTo3(ctx->gocPlayerKinematicParams->velocity);
-			jumpEnterNormal.normalize();
-			velocity3 -= jumpEnterNormal * velocity3.dot(jumpEnterNormal);
-			velocity3 += jumpEnterNormal * 2.5f;
-			ctx->gocPlayerKinematicParams->velocity = csl::math::Vector4(velocity3.x(), velocity3.y(), velocity3.z(), 0);
-			jumpStatus = true; // reset it once
-		}
-		return originalStep_Jump(self, ctx, deltaTime);
-	}
-	// fullJump
-	if (!isShortHop)
-	{
-		if (!jumpAnim && !dWings && jumpTimer >= 0.12f) {
-			// We Spin after 0.12 seconds
-			ctx->ChangeState("SPINJUMP");
-			ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationState("SPINJUMP", 0xFE);
-			ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(1, 1);
-			*(uint8_t*)((char*)self + 0xF4) = 1u;
-			jumpAnim = true;
-		}
-	}
-	return originalStep_Jump(self, ctx, deltaTime);
 }
 
 HOOK(void, __fastcall, Leave_Jump, 0x1406c2b70, app::player::StateJump* self, app::player::PlayerHsmContext* ctx, int nextState) {
@@ -845,6 +871,7 @@ HOOK(void, __fastcall, Leave_Jump, 0x1406c2b70, app::player::StateJump* self, ap
 	jumpStatus = false;
 	jumpAnim = false;
 	isShortHop = false;
+	jumpTricked = false;
 	originalLeave_Jump(self, ctx, nextState);
 }
 
@@ -1114,7 +1141,7 @@ BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID res
 		INSTALL_HOOK(bindAction);
 		INSTALL_HOOK(Enter_HomingFinished);
 		INSTALL_HOOK(Step_HomingFinished);
-		INSTALL_HOOK(Step_Drift);
+		//INSTALL_HOOK(Step_Drift);
 		
 		break;
 	case DLL_PROCESS_DETACH:
