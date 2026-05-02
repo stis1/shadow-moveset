@@ -256,11 +256,10 @@ bool driftdash_inputs(app::player::PlayerHsmContext* ctx) {
 }
 
 bool bouncejump_inputs(app::player::PlayerHsmContext* ctx) {
-	/*if (ctx->DoHoming(0)) {
-		return 1;
-	}*/
-	ctx->DoHoming(0);
 	auto* pGOCInput = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent();
+	if (ctx->DoHoming(0) && pGOCInput->actionMonitors[1].state & 512) {
+		return 1;
+	}
 	float Speed = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation->Speed.value();
 	
 	if (pGOCInput->actionMonitors[7].state & 512 && rolling) {
@@ -622,8 +621,18 @@ HOOK(void, __fastcall, Leave_StompingDown, 0x14A85DF40, app::player::StateStompi
 	return originalLeave_StompingDown(self, ctx, nextState);
 }
 
+HOOK(bool, __fastcall, ProcessMsg_StompingDown, 0x1406D10C0, app::player::StateStompingDown* self, app::player::PlayerHsmContext* ctx, hh::fnd::Message* message) {
+	if (message->ID == hh::fnd::MessageID::EightFourNineSeven && !wasI) {
+		if (!Patches::SomeLogic(ctx)) {
+			ctx->gocPlayerHsm->ChangeState(11, 10);
+			return 1;
+		}
+	}
+	return originalProcessMsg_StompingDown(self, ctx, message);
+}
+
 HOOK(void, __fastcall, Enter_StompingLand, 0x1406D0430, app::player::StateStompingLand* self, app::player::PlayerHsmContext* ctx, int previousState) {
-	ctx->gocPlayerKinematicParams->velocity = csl::math::Vector4(0, 0, 0, 0);
+	//ctx->gocPlayerKinematicParams->velocity = csl::math::Vector4(0, 0, 0, 0);
 	originalEnter_StompingLand(self, ctx, previousState);
 	if (ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[7].state & 256 && WantToBounce) {	
 		ctx->gocPlayerHsm->hsm.ChangeState(11);
@@ -697,6 +706,12 @@ HOOK(void, __fastcall, Enter_BounceJump, 0x1406C06E0, app::player::StateBounceJu
 		NOTIFY("hacking bounce speed");
 #endif
 		originalEnter_BounceJump(self, ctx, previousState);
+	}
+	if (previousState == 11) {
+		originalEnter_BounceJump(self, ctx, previousState);
+		ctx->StopEffects();
+		ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationState("DBLOW_DOWN", 0xFE);
+		return;
 	}
 	if (previousState != 55) {
 		rfl_idiotism::jump_speed_func("apply");
@@ -796,7 +811,7 @@ HOOK(bool, __fastcall, Step_Jump, 0x14a7c1140, app::player::StateJump* self, app
 		jumpTricked = false;
 		return 1;
 	}
-	PRINT_BOOLEAN(jumpTricked);
+	//PRINT_BOOLEAN(jumpTricked);
 	if (!jumpTricked) {
 		// player jump decision
 		if (jumpTimer < 0.12f)
@@ -818,7 +833,7 @@ HOOK(bool, __fastcall, Step_Jump, 0x14a7c1140, app::player::StateJump* self, app
 			ctx->gocPlayerHsm->statePluginManager->GetPlugin<app::player::StatePluginCollision>()->SetTypeAndRadius(1, 0); // Shadow doesn't deal damage
 		}
 		if (!jumpAnim && isShortHop && jumpTimer > 0.5f) {
-			ctx->playerObject->GetComponent<hh::anim::GOCAnimator>()->ChangeState("FALL");
+			ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationState("FALL",0xFE);
 			*(uint8_t*)((char*)self + 0x40) = 1u;
 			return originalStep_Jump(self, ctx, deltaTime);
 		}
@@ -875,8 +890,28 @@ HOOK(void, __fastcall, Leave_Jump, 0x1406c2b70, app::player::StateJump* self, ap
 	originalLeave_Jump(self, ctx, nextState);
 }
 
+HOOK(void, __fastcall, Enter_DoubleJump, 0x14A78B1C0, app::player::StateDoubleJump* self, app::player::PlayerHsmContext* ctx, int previousState) {
+	//bool res = ctx->DoHoming(0);
+	//PRINT_BOOLEAN(res);
+	//if (res) {
+	//	ctx->DoHoming(0);
+	//	return;
+	//}
+	//if (!res) {
+	//	ctx->gocPlayerHsm->hsm.ChangeState(13);
+	//	return;
+	//}
+	originalEnter_DoubleJump(self, ctx, previousState);
+}
+
+HOOK(void, __fastcall, Enter_JumpDash, 0x1406C28A0, app::player::StateJumpDash* self, app::player::PlayerHsmContext* ctx, int previousState) {
+	originalEnter_JumpDash(self, ctx, previousState);
+	//ctx->StopEffects();
+	ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationState("JUMP_BALL", 0xFE);
+}
+
 HOOK(bool, __fastcall, Step_AirBoost, 0x14A670E80, app::player::StateAirBoost* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
-	if (ctx->DoHoming(0)) {
+	if (ctx->DoHoming(0) && ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[1].state & 512) {
 		return 1;
 	}
 	if (ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent()->actionMonitors[0].state & 512) {
@@ -901,10 +936,11 @@ HOOK(void, __fastcall, Enter_Run, 0x1406C7000, app::player::StateRun* self, app:
 		ctx->gocPlayerHsm->hsm.ChangeState(107);
 		return;
 	}
-	
-	if (previousState == 9 && isShortHop && jumpAnim) {
+	WriteProtected<byte>(0x1406df3cf, 0xEB);
+	if (previousState == 9 && isShortHop) {
 		originalEnter_Run(self, ctx, previousState);
-		ctx->playerObject->GetComponent<hh::anim::GOCAnimator>()->ChangeState("SPRING_LANDING"); // hmm
+		//ctx->playerObject->GetComponent<app::player::GOCPlayerVisual>()->SetAnimationState("SPRING_LANDING", 0xFE); // hmm
+		ctx->gocPlayerHsm->hsm.ChangeState(156);
 		return;
 	}
 	if (previousState == 24 && r2Hold) {
@@ -949,7 +985,7 @@ HOOK(void, __fastcall, bindAction, 0x140c0db60, hh::hid::InputMapSettings* self,
 	PRINT_INTEGER(inputID);
 }
 
-inline const char* decideHomingFinishAnim(Hedgehog player ,char counter) {
+const char* decideHomingFinishAnim(Hedgehog player ,char counter) {
 	switch (player) 
 	{
 		case Hedgehog::Sonic: 
@@ -1032,7 +1068,7 @@ HOOK(bool, __fastcall, Step_HomingFinished, 0x1406985B0, app::player::StateHomin
 	if (res) {
 		WriteProtected<DWORD>(0x1406988A0, 0x00009BE8);
 		WriteProtected<byte>(0x1406988A4, 0x00);
-		PRINT_FLOAT(homingFinishedTimer);
+		//PRINT_FLOAT(homingFinishedTimer);
 		homingFinishedTimer = 0.0f;
 	}
 	return res;
@@ -1045,7 +1081,7 @@ HOOK(void, __fastcall, Enter_Drift, 0x1, app::player::StateDrift* self, app::pla
 HOOK(bool, __fastcall, Step_Drift, 0x1406AF920, app::player::StateDrift* self, app::player::PlayerHsmContext* ctx, float deltaTime) {
 	static float timer{};
 	auto* pParams = hh::fnd::ResourceManager::GetInstance()->GetResource<hh::fnd::ResReflectionT<heur::rfl::StandardCameraConfig>>("standard_camera_ws")->GetData();
-	pParams->common.azimuthSensitivity = 500;
+	//pParams->common.azimuthSensitivity = 500;
 	if (ctx->blackboardStatus->GetWorldFlag(app::player::BlackboardStatus::WorldFlag::OUT_OF_CONTROL)) {
 		ctx->gocPlayerHsm->ChangeState(4, 0);
 		timer = 0;
@@ -1055,7 +1091,7 @@ HOOK(bool, __fastcall, Step_Drift, 0x1406AF920, app::player::StateDrift* self, a
 	app::level::PlayerInformation* playerInfo = hh::game::GameManager::GetInstance()->GetService<app::level::LevelInfo>()->playerInformation;
 	float speed = playerInfo->Speed.value();
 	hh::game::InputComponent* inputComp = ctx->playerObject->GetComponent<hh::game::GOCInput>()->GetInputComponent();
-	bool circleDown = inputComp->actionMonitors[7].state & 256;
+	bool circleDown = inputComp->actionMonitors[11].state & 256;
 	bool r2Hold = inputComp->actionMonitors[3].state & 256;
 	bool r2Tap = inputComp->actionMonitors[3].state & 512;
 	bool crossTap = inputComp->actionMonitors[0].state & 512;
@@ -1097,11 +1133,6 @@ HOOK(bool, __fastcall, Step_Drift, 0x1406AF920, app::player::StateDrift* self, a
 	}
 }
 
-HOOK(bool, __fastcall, ProcessMsg_Jump, 0x1406C1AD0, app::player::StateJump* self, app::player::PlayerHsmContext* ctx, const hh::fnd::Message* message) {
-	//PRINT_INTEGER(static_cast<uint32_t>(message->ID));
-	return originalProcessMsg_Jump(self, ctx, message);
-}
-
 BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID reserved)
 {
 	switch (reason)
@@ -1109,7 +1140,6 @@ BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID res
 	case DLL_PROCESS_ATTACH:
 		Patches::Patch();
 		SetHedgehog();
-
 		INSTALL_HOOK(InitPlayer);
 
 		INSTALL_HOOK(Enter_Sliding);
@@ -1123,6 +1153,7 @@ BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID res
 		INSTALL_HOOK(Enter_StompingDown);
 		INSTALL_HOOK(Step_StompingDown);
 		INSTALL_HOOK(Leave_StompingDown);
+		INSTALL_HOOK(ProcessMsg_StompingDown);
 		INSTALL_HOOK(Enter_StompingLand);
 		INSTALL_HOOK(Step_GrindDoubleJump);	
 		INSTALL_HOOK(ProcessMsg_GrindDoubleJump);
@@ -1131,8 +1162,9 @@ BOOL WINAPI DllMain(_In_ HINSTANCE hInstance, _In_ DWORD reason, _In_ LPVOID res
 		INSTALL_HOOK(Leave_BounceJump);
 		INSTALL_HOOK(Enter_Jump);
 		INSTALL_HOOK(Step_Jump);
-		//INSTALL_HOOK(ProcessMsg_Jump);
 		INSTALL_HOOK(Leave_Jump);
+		INSTALL_HOOK(Enter_DoubleJump);
+		INSTALL_HOOK(Enter_JumpDash);
 		INSTALL_HOOK(Step_AirBoost);
 		INSTALL_HOOK(Enter_Run);
 		INSTALL_HOOK(Enter_LightDash);
